@@ -1,0 +1,1424 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Asset Manager — บริหารสินทรัพย์ส่วนตัว</title>
+<style>
+/* ============================================================= DESIGN TOKENS */
+:root{
+  --bg:#f4f6fb; --surface:#ffffff; --surface-2:#f0f3fa; --border:#e2e8f0;
+  --text:#1a2333; --muted:#64748b; --faint:#94a3b8;
+  --brand:#2563eb; --brand-ink:#1d4ed8; --brand-soft:#dbeafe;
+  --green:#16a34a; --green-soft:#dcfce7; --amber:#d97706; --amber-soft:#fef3c7;
+  --red:#dc2626; --red-soft:#fee2e2; --purple:#7c3aed;
+  --c-compounder:#7c3aed; --c-dividend:#2563eb; --c-highyield:#0891b2;
+  --c-defensive:#16a34a; --c-cash:#94a3b8;
+  --c-invest:#2563eb; --c-realestate:#d97706; --c-insurance:#0891b2;
+  --radius:14px; --radius-sm:9px; --shadow:0 1px 3px rgba(15,23,42,.07),0 8px 24px rgba(15,23,42,.05);
+  --space:16px; --maxw:1080px;
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans Thai","Sarabun","Kanit",Roboto,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0c111d; --surface:#151c2c; --surface-2:#1c2538; --border:#293349;
+    --text:#e8edf6; --muted:#94a3b8; --faint:#64748b;
+    --brand:#3b82f6; --brand-ink:#60a5fa; --brand-soft:#1e293b;
+    --green-soft:#0c2a1a; --amber-soft:#2c2410; --red-soft:#2c1515;
+    --shadow:0 1px 3px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.5;
+  font-size:15px;-webkit-text-size-adjust:100%;}
+h1,h2,h3,h4{margin:0;font-weight:700;line-height:1.25}
+button{font-family:inherit;cursor:pointer}
+a{color:var(--brand-ink)}
+small{color:var(--muted)}
+
+/* ============================================================= LAYOUT */
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 var(--space)}
+header.topbar{position:sticky;top:0;z-index:30;background:var(--surface);
+  border-bottom:1px solid var(--border);box-shadow:0 1px 2px rgba(15,23,42,.04)}
+.topbar-inner{display:flex;align-items:center;gap:12px;padding:10px var(--space);
+  max-width:var(--maxw);margin:0 auto;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:9px;font-weight:800;font-size:17px;margin-right:auto}
+.brand .logo{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,var(--brand),var(--purple));
+  display:grid;place-items:center;color:#fff;font-size:16px}
+.topbar-actions{display:flex;gap:8px;flex-wrap:wrap}
+.btn{border:1px solid var(--border);background:var(--surface);color:var(--text);
+  padding:8px 13px;border-radius:var(--radius-sm);font-size:13.5px;font-weight:600;
+  display:inline-flex;align-items:center;gap:6px;min-height:40px;transition:.12s}
+.btn:hover{background:var(--surface-2)}
+.btn.primary{background:var(--brand);color:#fff;border-color:var(--brand)}
+.btn.primary:hover{background:var(--brand-ink)}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn.sm{padding:5px 10px;min-height:32px;font-size:12.5px}
+.btn.danger{color:var(--red);border-color:var(--red-soft)}
+.btn.block{width:100%;justify-content:center}
+
+/* tabs */
+nav.tabs{display:flex;gap:4px;max-width:var(--maxw);margin:0 auto;padding:0 var(--space);
+  overflow-x:auto;scrollbar-width:none}
+nav.tabs::-webkit-scrollbar{display:none}
+.tab{flex:0 0 auto;border:none;background:transparent;color:var(--muted);
+  padding:13px 16px;font-size:14.5px;font-weight:600;border-bottom:2.5px solid transparent;
+  white-space:nowrap;min-height:48px;display:flex;align-items:center;gap:7px}
+.tab[aria-selected="true"]{color:var(--brand-ink);border-bottom-color:var(--brand)}
+.tab .ic{font-size:16px}
+
+main{padding:22px 0 90px}
+.view{display:grid;gap:18px}
+
+/* cards */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  box-shadow:var(--shadow);padding:18px}
+.card h2{font-size:16px;margin-bottom:3px}
+.card h2 .sub{font-weight:500;color:var(--muted);font-size:13px}
+.card .card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.grid{display:grid;gap:14px}
+.grid.cols-2{grid-template-columns:1fr 1fr}
+.grid.cols-3{grid-template-columns:repeat(3,1fr)}
+.grid.cols-4{grid-template-columns:repeat(4,1fr)}
+
+/* stat */
+.stat{background:var(--surface-2);border-radius:var(--radius-sm);padding:14px}
+.stat .label{font-size:12.5px;color:var(--muted);margin-bottom:4px}
+.stat .value{font-size:21px;font-weight:800;letter-spacing:-.3px}
+.stat .value.sm{font-size:17px}
+.stat .hint{font-size:11.5px;color:var(--faint);margin-top:3px}
+.hero{background:linear-gradient(135deg,var(--brand),var(--purple));color:#fff;border:none}
+.hero .label{color:rgba(255,255,255,.85)}
+.hero .value{font-size:30px}
+.hero .hint{color:rgba(255,255,255,.8)}
+
+/* progress */
+.progress{height:12px;background:var(--surface-2);border-radius:99px;overflow:hidden;border:1px solid var(--border)}
+.progress > i{display:block;height:100%;background:linear-gradient(90deg,var(--brand),var(--green));border-radius:99px;transition:width .4s}
+
+/* chips / banners */
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;
+  padding:5px 10px;border-radius:99px;background:var(--surface-2);color:var(--muted)}
+.chip.good{background:var(--green-soft);color:var(--green)}
+.chip.warn{background:var(--amber-soft);color:var(--amber)}
+.chip.bad{background:var(--red-soft);color:var(--red)}
+.banner{display:flex;gap:11px;padding:13px 15px;border-radius:var(--radius-sm);font-size:13.5px;align-items:flex-start}
+.banner .bi{font-size:18px;line-height:1.2}
+.banner.warn{background:var(--amber-soft);color:var(--amber)}
+.banner.bad{background:var(--red-soft);color:var(--red)}
+.banner.info{background:var(--brand-soft);color:var(--brand-ink)}
+.banner.good{background:var(--green-soft);color:var(--green)}
+.banner b{font-weight:700}
+
+/* tables */
+.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+.tbl th{text-align:left;color:var(--muted);font-weight:600;font-size:12px;
+  padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+.tbl td{padding:10px;border-bottom:1px solid var(--border);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl td.num,.tbl th.num{text-align:right;font-variant-numeric:tabular-nums}
+.tbl .row-actions{display:flex;gap:5px;justify-content:flex-end}
+.type-dot{display:inline-block;width:9px;height:9px;border-radius:99px;margin-right:6px;vertical-align:middle}
+
+/* forms */
+.field{display:grid;gap:5px;margin-bottom:13px}
+.field label{font-size:12.5px;font-weight:600;color:var(--muted)}
+.field .req{color:var(--red)}
+input,select,textarea{font-family:inherit;font-size:14.5px;padding:10px 12px;border:1px solid var(--border);
+  border-radius:var(--radius-sm);background:var(--surface);color:var(--text);width:100%;min-height:42px}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--brand-soft);border-color:var(--brand)}
+textarea{min-height:80px;resize:vertical}
+.field .hint{font-size:11.5px;color:var(--faint)}
+.field.row-check{display:flex;align-items:center;gap:9px}
+.field.row-check input{width:auto;min-height:auto;width:18px;height:18px}
+.field.row-check label{margin:0}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
+.form-grid .full{grid-column:1/-1}
+
+/* goal form */
+.goalform{display:grid;grid-template-columns:repeat(3,1fr);gap:0 14px}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden}
+.seg button{border:none;background:var(--surface);padding:9px 14px;font-size:13px;font-weight:600;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--brand);color:#fff}
+
+/* modal */
+.overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);backdrop-filter:blur(2px);
+  z-index:50;display:none;align-items:flex-start;justify-content:center;padding:24px 14px;overflow-y:auto}
+.overlay.open{display:flex}
+.modal{background:var(--surface);border-radius:var(--radius);width:100%;max-width:560px;
+  box-shadow:0 20px 60px rgba(0,0,0,.3);margin:auto}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--border)}
+.modal-head h3{font-size:16px}
+.modal-body{padding:18px}
+.modal-foot{padding:14px 18px;border-top:1px solid var(--border);display:flex;gap:9px;justify-content:flex-end}
+.x{border:none;background:transparent;font-size:22px;color:var(--muted);line-height:1;padding:4px 8px}
+
+/* misc */
+.muted{color:var(--muted)}
+.empty{text-align:center;padding:30px 16px;color:var(--muted)}
+.empty .big{font-size:34px;margin-bottom:6px}
+.row-between{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.allocbar{display:grid;grid-template-columns:120px 1fr 84px;gap:10px;align-items:center;margin-bottom:9px;font-size:13px}
+.allocbar .track{height:18px;background:var(--surface-2);border-radius:6px;position:relative;overflow:hidden}
+.allocbar .cur{height:100%;border-radius:6px}
+.allocbar .tgt{position:absolute;top:-3px;bottom:-3px;width:2.5px;background:var(--text);opacity:.55}
+.legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12.5px;color:var(--muted);margin-top:8px}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.divider{height:1px;background:var(--border);margin:4px 0}
+.kv{display:flex;justify-content:space-between;gap:10px;padding:7px 0;font-size:13.5px;border-bottom:1px dashed var(--border)}
+.kv:last-child{border-bottom:none}
+.kv .k{color:var(--muted)}
+.kv .v{font-weight:700;font-variant-numeric:tabular-nums}
+.promptbox{width:100%;min-height:150px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+footer.foot{text-align:center;color:var(--faint);font-size:12px;padding:24px var(--space) 40px;line-height:1.6}
+.disc{font-size:11.5px;color:var(--faint);margin-top:10px;font-style:italic}
+
+/* self test */
+#selftest-view{padding:24px 0}
+.test-pass{color:var(--green)} .test-fail{color:var(--red);font-weight:700}
+
+/* responsive */
+@media (max-width:760px){
+  .grid.cols-3,.grid.cols-4{grid-template-columns:1fr 1fr}
+  .goalform{grid-template-columns:1fr 1fr}
+}
+@media (max-width:560px){
+  body{font-size:14.5px}
+  .grid.cols-2,.grid.cols-3,.grid.cols-4{grid-template-columns:1fr}
+  .form-grid{grid-template-columns:1fr}
+  .goalform{grid-template-columns:1fr}
+  .allocbar{grid-template-columns:88px 1fr 64px;gap:7px;font-size:12px}
+  .hero .value{font-size:25px}
+  /* tables collapse to cards */
+  .tbl.responsive thead{display:none}
+  .tbl.responsive,.tbl.responsive tbody,.tbl.responsive tr,.tbl.responsive td{display:block;width:100%}
+  .tbl.responsive tr{border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:10px;padding:6px 10px}
+  .tbl.responsive td{border:none;padding:6px 0;display:flex;justify-content:space-between;gap:12px;text-align:right}
+  .tbl.responsive td::before{content:attr(data-label);color:var(--muted);font-size:12px;font-weight:600;text-align:left}
+  .tbl.responsive td.num{text-align:right}
+  .tbl.responsive td.row-actions-cell{justify-content:flex-end}
+  .tbl.responsive td.row-actions-cell::before{content:""}
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><span class="logo">฿</span><span>Asset Manager</span></div>
+    <div class="topbar-actions">
+      <button class="btn sm" id="btn-export">⬇️ Export</button>
+      <button class="btn sm" id="btn-import">⬆️ Import</button>
+      <input type="file" id="file-import" accept="application/json,.json" hidden />
+    </div>
+  </div>
+  <nav class="tabs" id="tabs" role="tablist"></nav>
+</header>
+
+<main><div class="wrap"><div id="view" class="view"></div></div></main>
+
+<footer class="foot">
+  <div>Asset Manager · v1.0 · ข้อมูลเก็บในเครื่องนี้เท่านั้น (localStorage)</div>
+  <div class="disc">ไม่ใช่คำแนะนำการลงทุน — เป็นเครื่องมือช่วยคิดอย่างมีระบบ ตัวเลขเป็นค่าประมาณ ปรับตามความเสี่ยงที่รับได้จริง</div>
+  <div style="margin-top:6px"><a href="?selftest">รัน self-test</a></div>
+</footer>
+
+<!-- generic modal -->
+<div class="overlay" id="overlay"><div class="modal" id="modal">
+  <div class="modal-head"><h3 id="modal-title"></h3><button class="x" id="modal-x">×</button></div>
+  <div class="modal-body" id="modal-body"></div>
+  <div class="modal-foot" id="modal-foot"></div>
+</div></div>
+
+<script>
+"use strict";
+/* ===================================================================================
+   ASSET MANAGER — single-file app. Sections:
+   0 CONSTANTS · 1 STATE · 2 CORE MATH (pure) · 3 PROMPTS · 4 RENDER · 5 EVENTS · 6 SELF-TESTS · BOOT
+   Data lives in localStorage (1 versioned JSON). STATE is the single source of truth.
+   No external network requests. Charts = inline SVG. ไม่ใช่คำแนะนำการลงทุน.
+=================================================================================== */
+
+/* ===================================================== SECTION 0 — CONSTANTS */
+const SCHEMA_VERSION = 1;
+const STORAGE_KEY = "assetManager.state";
+const BACKUP_KEY  = "assetManager.state.bak";
+
+const TABS = [
+  {id:"dashboard",  label:"สรุป",            ic:"📊"},
+  {id:"investing",  label:"การลงทุน",        ic:"📈"},
+  {id:"realestate", label:"อสังหาริมทรัพย์", ic:"🏠"},
+  {id:"insurance",  label:"ประกัน",          ic:"🛡️"},
+];
+
+const ENUMS = {
+  asset_class:      ["stock","reit","bond","fund","other"],
+  stock_type:       ["dividend_grower","compounder","high_yield","defensive","none"],
+  valuation_verdict:["unknown","cheap","fair","expensive"],
+  nestegg_method:   ["four_percent","dividend_only"],
+  market:           ["TH","US","other"],
+  property_type:    ["house","condo","land","commercial","townhouse"],
+  policy_type:      ["life","health","endowment","annuity","unit_linked"],
+};
+const LABELS = {
+  asset_class:{stock:"หุ้น",reit:"REIT/กองทุนอสังหา",bond:"ตราสารหนี้",fund:"กองทุนรวม",other:"อื่นๆ"},
+  stock_type:{dividend_grower:"Dividend Grower (ปันผลโต)",compounder:"Compounder/Growth (โต)",
+    high_yield:"High-Yield (REIT/utility)",defensive:"Defensive (ตั้งรับ)",none:"ไม่ระบุ/เงินสด"},
+  valuation_verdict:{unknown:"ยังไม่ประเมิน",cheap:"ถูก",fair:"เหมาะสม",expensive:"แพง"},
+  nestegg_method:{four_percent:"กฎ 4% (×25)",dividend_only:"อยู่ด้วยปันผล"},
+  market:{TH:"ไทย",US:"สหรัฐฯ",other:"อื่นๆ"},
+  property_type:{house:"บ้านเดี่ยว",condo:"คอนโด",land:"ที่ดิน",commercial:"อาคารพาณิชย์",townhouse:"ทาวน์เฮาส์"},
+  policy_type:{life:"ประกันชีวิต",health:"ประกันสุขภาพ",endowment:"สะสมทรัพย์",annuity:"บำนาญ",unit_linked:"ยูนิตลิงค์"},
+};
+// 4 investment buckets used by the framework (+ cash buffer)
+const BUCKETS = ["compounder","dividend_grower","high_yield","defensive","cash"];
+const BUCKET_LABEL = {compounder:"Compounder/Growth",dividend_grower:"Dividend Grower",
+  high_yield:"High-Yield",defensive:"Defensive",cash:"เงินสด/พักเงิน"};
+const BUCKET_COLOR = {compounder:"var(--c-compounder)",dividend_grower:"var(--c-dividend)",
+  high_yield:"var(--c-highyield)",defensive:"var(--c-defensive)",cash:"var(--c-cash)"};
+
+// Target allocation bands by required annual return (%). Order matters.
+const TARGET_ALLOCATION = [
+  {max:5,  name:"อนุรักษ์-เน้น income", a:{compounder:15,dividend_grower:30,high_yield:25,defensive:25,cash:5}},
+  {max:8,  name:"สมดุล",                a:{compounder:30,dividend_grower:30,high_yield:15,defensive:15,cash:10}},
+  {max:12, name:"เอียง growth",         a:{compounder:50,dividend_grower:25,high_yield:10,defensive:10,cash:5}},
+];
+const BRAKE_MSG = "ผลตอบแทนที่ต้องการสูงเกินไป — อย่าไล่ผลตอบแทนด้วยการเพิ่มความเสี่ยง ให้ปรับ input แทน: ออมเพิ่ม / ยืดเวลา / ลดเป้ารายได้";
+
+// Scoring framework text embedded into AI-prompt #2 (from wiki/stock-scoring-sheet.md)
+const SCORING_FRAMEWORK = `กรอบให้คะแนนหุ้น (ใช้เป็นเกณฑ์คัดกรอง):
+
+[ด่านกลาง — ทุกหุ้นต้องผ่าน ไม่ผ่านแม้ข้อเดียว = ตัดทิ้ง]
+- เข้าใจธุรกิจ อธิบายได้ว่าหาเงินยังไง (circle of competence)
+- Interest coverage > 5 เท่า (จ่ายดอกเบี้ยสบาย)
+- ไม่มี red flag งบ (ไม่เพิ่มทุนรัวๆ / กระแสเงินสดดำเนินงานไม่ติดลบเรื้อรัง / ผู้สอบบัญชีไม่ตั้งข้อสังเกต)
+
+[เกณฑ์เฉพาะตามประเภท — Gate + ให้คะแนน 6 ข้อ ข้อละ 0–2 เต็ม 12]
+A. Dividend Grower — Gate: ปันผลจาก FCF จริง, payout<80%, ไม่เคยลด/งดปันผล ~10 ปี.
+   คะแนน: payout(<50=2,50-70=1,>70=0); ปีที่เพิ่มปันผลต่อเนื่อง(10+=2,5-9=1); ปันผลโตชนะเงินเฟ้อ; กำไร/FCF นิ่ง; D/E<1; ROE>12-15% สม่ำเสมอ
+B. Compounder/Growth — Gate: ROIC/ROE>15% ไม่ได้มาจากหนี้, รายได้โตจริง 5 ปี, กระแสเงินสดดำเนินงานบวก.
+   คะแนน: ROIC/ROE สูง-นิ่ง; reinvestment runway ยาว; margin ขยาย; รายได้โตสม่ำเสมอ; งบสะอาดหนี้ต่ำ; PEG<1.5
+C. High-Yield (REIT/utility) — Gate: interest coverage แข็ง, payout จาก AFFO/FFO ยั่งยืน, D/E ไม่เกินกลุ่ม.
+   คะแนน: AFFO/FFO payout ไม่ตึง; คุณภาพรายได้(occupancy/สัญญายาว/regulated); โครงสร้างหนี้ดี; ประวัติ distribution สม่ำเสมอ; distribution โต; yield เทียบอดีตตัวเองสมเหตุผล
+D. Defensive/Staple — Gate: ผ่านวิกฤต 2008/2020, หนี้ต่ำ, สินค้าจำเป็นใช้ซ้ำ.
+   คะแนน: กำไรนิ่ง; margin คงที่; moat/แบรนด์; ROE สม่ำเสมอ; D/E ต่ำ; ปันผล+yield พอใช้
+
+[แปลผลคะแนน] 10-12 = คุณภาพสูง · 7-9 = กลาง · ≤6 = ต่ำ
+[เช็คราคา] P/E เทียบค่าเฉลี่ย 5-10 ปีตัวเอง + เทียบคู่แข่ง; yield เทียบอดีตตัวเอง; margin of safety ~20-30% ใต้มูลค่าประเมิน
+[ตัดสินใจ] คุณภาพสูง+ราคาถูก/เหมาะ=ซื้อ · คุณภาพสูง+แพง=watchlist · คุณภาพกลาง+ถูก=พิจารณา/ลดไซส์ · นอกนั้น=ผ่าน`;
+
+const DISCLAIMER_TH = "หมายเหตุ: ข้อมูลข้างต้นเพื่อช่วยวิเคราะห์เท่านั้น ไม่ใช่คำแนะนำการลงทุน โปรดตัดสินใจด้วยตนเอง";
+
+/* ===================================================== SECTION 1 — STATE */
+let STATE = null;
+let ACTIVE_TAB = "dashboard";
+let _saveTimer = null;
+
+function uid(p){ return p + "_" + Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4); }
+function nowISO(){ return new Date().toISOString(); }
+function currentMonth(){ const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); }
+
+function defaultState(){
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    meta:{ appName:"Asset Manager", createdAt:nowISO(), updatedAt:nowISO(), currency:"THB", onboarded:false },
+    settings:{ wht_pct:10, concentration_threshold_pct:40, glide_years:6 },
+    goal:{ target_monthly_thb:100000, target_year:2040, starting_capital_thb:0,
+           monthly_contribution_thb:0, expected_growth_pct:5, nestegg_method:"four_percent" },
+    investing:{ holdings:[] },
+    real_estate:{ properties:[] },
+    insurance:{ policies:[] },
+  };
+}
+
+function loadState(){
+  let raw;
+  try{ raw = localStorage.getItem(STORAGE_KEY); }catch(e){ raw=null; }
+  if(!raw){ return {state:defaultState(), fresh:true}; }
+  try{
+    const parsed = JSON.parse(raw);
+    const migrated = migrateState(parsed);
+    const {ok, value} = validateState(migrated);
+    if(!ok) return {state:null, corrupt:true};
+    return {state:value, fresh:false};
+  }catch(e){ return {state:null, corrupt:true}; }
+}
+
+function persist(){
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE)); }catch(e){}
+}
+function persistDebounced(){
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(persist, 150);
+}
+
+// commit = atomic swap + persist + re-render active tab
+function commit(next){
+  next.meta = next.meta || {};
+  next.meta.updatedAt = nowISO();
+  STATE = next;
+  persist();
+  render(ACTIVE_TAB);
+}
+
+function exportState(){
+  const data = JSON.stringify(STATE, null, 2);
+  const blob = new Blob([data], {type:"application/json"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "asset-manager-backup-" + currentMonth() + "-" + new Date().getDate() + ".json";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+
+function importStateFromText(rawText){
+  let parsed;
+  try{ parsed = JSON.parse(rawText); }
+  catch(e){ throw new Error("ไฟล์ไม่ใช่ JSON ที่ถูกต้อง"); }
+  const migrated = migrateState(parsed);          // version check first (older exports still load)
+  const {ok, value, errors} = validateState(migrated);
+  if(!ok) throw new Error("ข้อมูลในไฟล์ไม่สมบูรณ์:\n- " + errors.slice(0,8).join("\n- "));
+  // stash current (valid) state so a bad-but-valid import can be undone once
+  try{ if(STATE) localStorage.setItem(BACKUP_KEY, JSON.stringify(STATE)); }catch(e){}
+  commit(value);
+}
+
+// migrate older schema versions forward. Reject newer-than-known.
+function migrateState(obj){
+  if(typeof obj!=="object"||obj===null) throw new Error("รูปแบบไฟล์ไม่ถูกต้อง");
+  let v = Number(obj.schemaVersion||0);
+  if(v > SCHEMA_VERSION) throw new Error("ไฟล์นี้สร้างจากแอปเวอร์ชันใหม่กว่า กรุณาอัปเดตแอป");
+  let s = obj;
+  // (future migrations: if(v<2){...; v=2;})
+  s.schemaVersion = SCHEMA_VERSION;
+  return s;
+}
+
+// validate-before-commit. Collect ALL errors; never silently default a real value.
+function validateState(obj){
+  const errors=[];
+  const isNum = n => typeof n==="number" && Number.isFinite(n);
+  const def = defaultState();
+
+  const out = {
+    schemaVersion: SCHEMA_VERSION,
+    meta: Object.assign({}, def.meta, (obj.meta||{})),
+    settings: Object.assign({}, def.settings, (obj.settings||{})),
+    goal: Object.assign({}, def.goal, (obj.goal||{})),
+    investing:{ holdings:[] },
+    real_estate:{ properties:[] },
+    insurance:{ policies:[] },
+  };
+
+  // goal — the load-bearing numbers
+  const g = out.goal;
+  if(!(isNum(g.target_monthly_thb) && g.target_monthly_thb>0))
+    errors.push("เป้ารายได้/เดือน ต้องเป็นตัวเลขมากกว่า 0");
+  if(!(isNum(g.target_year) && g.target_year>=2000 && g.target_year<=2200))
+    errors.push("ปีเป้าหมายไม่ถูกต้อง");
+  ["starting_capital_thb","monthly_contribution_thb","expected_growth_pct"].forEach(k=>{
+    if(!isNum(g[k])) errors.push("goal."+k+" ต้องเป็นตัวเลข");
+  });
+  if(ENUMS.nestegg_method.indexOf(g.nestegg_method)<0) g.nestegg_method="four_percent";
+
+  // settings
+  const st = out.settings;
+  if(!isNum(st.wht_pct)||st.wht_pct<0||st.wht_pct>100) errors.push("settings.wht_pct ต้องอยู่ 0–100");
+  if(!isNum(st.glide_years)||st.glide_years<0) st.glide_years=6;
+  if(!isNum(st.concentration_threshold_pct)) st.concentration_threshold_pct=40;
+
+  // holdings
+  const inH = (obj.investing && Array.isArray(obj.investing.holdings)) ? obj.investing.holdings : [];
+  inH.forEach((h,i)=>{
+    if(typeof h!=="object"||!h){ errors.push("holding #"+(i+1)+" เสีย"); return; }
+    const o={
+      id: h.id||uid("h"), name:String(h.name||"").trim(), ticker:h.ticker?String(h.ticker):null,
+      asset_class: ENUMS.asset_class.includes(h.asset_class)?h.asset_class:"stock",
+      stock_type: ENUMS.stock_type.includes(h.stock_type)?h.stock_type:"none",
+      value_thb: Number(h.value_thb), yield_pct: Number(h.yield_pct),
+      cost_basis_thb: (h.cost_basis_thb==null||h.cost_basis_thb==="")?null:Number(h.cost_basis_thb),
+      quality_score: (h.quality_score==null||h.quality_score==="")?null:Number(h.quality_score),
+      valuation_verdict: ENUMS.valuation_verdict.includes(h.valuation_verdict)?h.valuation_verdict:"unknown",
+      market: ENUMS.market.includes(h.market)?h.market:"TH",
+      notes: h.notes?String(h.notes):null, created_at: h.created_at||nowISO(),
+    };
+    if(!o.name) errors.push("holding #"+(i+1)+" ไม่มีชื่อ");
+    if(!(isNum(o.value_thb)&&o.value_thb>=0)) errors.push("holding "+(o.name||i+1)+": มูลค่าไม่ถูกต้อง");
+    if(!(isNum(o.yield_pct)&&o.yield_pct>=0)) errors.push("holding "+(o.name||i+1)+": yield ไม่ถูกต้อง");
+    if(o.cost_basis_thb!=null && !(isNum(o.cost_basis_thb)&&o.cost_basis_thb>=0)) errors.push("holding "+o.name+": cost ไม่ถูกต้อง");
+    if(o.quality_score!=null && !(isNum(o.quality_score)&&o.quality_score>=0&&o.quality_score<=12)) errors.push("holding "+o.name+": คะแนนต้อง 0–12");
+    out.investing.holdings.push(o);
+  });
+
+  // properties
+  const inP = (obj.real_estate && Array.isArray(obj.real_estate.properties)) ? obj.real_estate.properties : [];
+  inP.forEach((p,i)=>{
+    if(typeof p!=="object"||!p){ errors.push("property #"+(i+1)+" เสีย"); return; }
+    const o={
+      id:p.id||uid("re"), name:String(p.name||"").trim(),
+      property_type: ENUMS.property_type.includes(p.property_type)?p.property_type:"condo",
+      market_value_thb:Number(p.market_value_thb),
+      purchase_price_thb:(p.purchase_price_thb==null||p.purchase_price_thb==="")?null:Number(p.purchase_price_thb),
+      mortgage_outstanding_thb:Number(p.mortgage_outstanding_thb||0),
+      monthly_payment_thb:Number(p.monthly_payment_thb||0),
+      rental_income_monthly_thb:Number(p.rental_income_monthly_thb||0),
+      rental_expense_monthly_thb:Number(p.rental_expense_monthly_thb||0),
+      counts_toward_passive: p.counts_toward_passive!==false,
+      notes:p.notes?String(p.notes):null, created_at:p.created_at||nowISO(),
+    };
+    if(!o.name) errors.push("property #"+(i+1)+" ไม่มีชื่อ");
+    ["market_value_thb","mortgage_outstanding_thb","monthly_payment_thb","rental_income_monthly_thb","rental_expense_monthly_thb"].forEach(k=>{
+      if(!(isNum(o[k])&&o[k]>=0)) errors.push("property "+(o.name||i+1)+": "+k+" ไม่ถูกต้อง");
+    });
+    out.real_estate.properties.push(o);
+  });
+
+  // policies
+  const inI = (obj.insurance && Array.isArray(obj.insurance.policies)) ? obj.insurance.policies : [];
+  inI.forEach((p,i)=>{
+    if(typeof p!=="object"||!p){ errors.push("policy #"+(i+1)+" เสีย"); return; }
+    const o={
+      id:p.id||uid("ins"), name:String(p.name||"").trim(),
+      policy_type: ENUMS.policy_type.includes(p.policy_type)?p.policy_type:"life",
+      insurer:p.insurer?String(p.insurer):null,
+      annual_premium_thb:Number(p.annual_premium_thb||0),
+      sum_insured_thb:Number(p.sum_insured_thb||0),
+      cash_value_thb:Number(p.cash_value_thb||0),
+      maturity_date:p.maturity_date?String(p.maturity_date):null,
+      beneficiary:p.beneficiary?String(p.beneficiary):null,
+      tax_deductible: !!p.tax_deductible,
+      counts_toward_networth: p.counts_toward_networth!==false,
+      notes:p.notes?String(p.notes):null, created_at:p.created_at||nowISO(),
+    };
+    if(!o.name) errors.push("policy #"+(i+1)+" ไม่มีชื่อ");
+    ["annual_premium_thb","sum_insured_thb","cash_value_thb"].forEach(k=>{
+      if(!(isNum(o[k])&&o[k]>=0)) errors.push("policy "+(o.name||i+1)+": "+k+" ไม่ถูกต้อง");
+    });
+    out.insurance.policies.push(o);
+  });
+
+  return { ok: errors.length===0, value: out, errors };
+}
+
+/* ===================================================== SECTION 2 — CORE MATH (pure, no DOM) */
+function clampPct(p){ if(!Number.isFinite(p)) return 0; return Math.min(100, Math.max(0,p)); }
+function nn(n){ return Number.isFinite(n)&&n>0 ? n : 0; }              // non-neg finite, else 0
+function n0(n){ return Number.isFinite(n) ? n : 0; }
+
+function addMonths(ym, n){
+  const [y,m] = ym.split("-").map(Number);
+  const total = y*12 + (m-1) + n;
+  const ny = Math.floor(total/12);
+  const nm = (total%12+12)%12 + 1;
+  return ny + "-" + String(nm).padStart(2,"0");
+}
+function monthsBetween(a, b){
+  const [ay,am]=a.split("-").map(Number), [by,bm]=b.split("-").map(Number);
+  return (by-ay)*12 + (bm-am);
+}
+
+// ---- per-holding & portfolio ----
+function holdingGrossAnnual(h){ return nn(h.value_thb) * nn(h.yield_pct) / 100; }
+function holdingNetMonthly(h, wht){ return holdingGrossAnnual(h) * (1 - clampPct(wht)/100) / 12; }
+function holdingYieldOnCost(h){
+  if(h.cost_basis_thb==null || !(h.cost_basis_thb>0)) return null;
+  return holdingGrossAnnual(h) / h.cost_basis_thb * 100;
+}
+function portfolioTotals(holdings, wht){
+  let totalValue=0, grossAnnual=0, costSum=0, grossOnCost=0;
+  holdings.forEach(h=>{
+    totalValue += nn(h.value_thb);
+    const ga = holdingGrossAnnual(h);
+    grossAnnual += ga;
+    if(h.cost_basis_thb!=null && h.cost_basis_thb>0){ costSum += h.cost_basis_thb; grossOnCost += ga; }
+  });
+  const netAnnual = grossAnnual * (1 - clampPct(wht)/100);
+  return {
+    count: holdings.length, totalValue, grossAnnualDividend:grossAnnual, netAnnualDividend:netAnnual,
+    netMonthlyDividend: netAnnual/12,
+    blendedYieldPct: totalValue>0 ? grossAnnual/totalValue*100 : 0,
+    netBlendedYieldPct: totalValue>0 ? netAnnual/totalValue*100 : 0,
+    yieldOnCostPct: costSum>0 ? grossOnCost/costSum*100 : null,
+  };
+}
+function concentration(holdings, thresholdPct){
+  const total = holdings.reduce((s,h)=>s+nn(h.value_thb),0);
+  if(total<=0) return {topName:null, topSharePct:0, flagged:false};
+  let top=holdings[0];
+  holdings.forEach(h=>{ if(nn(h.value_thb)>nn(top.value_thb)) top=h; });
+  const share = nn(top.value_thb)/total*100;
+  return {topName:top?top.name:null, topSharePct:share, flagged: share>thresholdPct};
+}
+
+// ---- nest egg & required capital ----
+function requiredCapital(targetMonthly, netBlendedYieldPct){
+  if(!(targetMonthly>0) || !(netBlendedYieldPct>0)) return null;
+  return targetMonthly*12 / (netBlendedYieldPct/100);
+}
+function nestEggFourPercent(targetMonthly){ return targetMonthly>0 ? targetMonthly*12*25 : null; }
+function nestEggDividendOnly(targetMonthly, netBlendedYieldPct){ return requiredCapital(targetMonthly, netBlendedYieldPct); }
+function targetNestEgg(goal, totals){
+  if(goal.nestegg_method==="dividend_only")
+    return nestEggDividendOnly(goal.target_monthly_thb, totals.netBlendedYieldPct);
+  return nestEggFourPercent(goal.target_monthly_thb);
+}
+
+// ---- required return (contribution-aware; solved numerically) ----
+// FV(P, C monthly, annual rate r, N months). Solve r s.t. FV>=target. Monotonic in r.
+function fvWith(P, C, rAnnual, months){
+  const i = Math.pow(1+rAnnual, 1/12) - 1;
+  if(Math.abs(i) < 1e-9) return P + C*months;
+  return P*Math.pow(1+i,months) + C*(Math.pow(1+i,months)-1)/i;
+}
+// returns decimal annual rate, 0 if already reachable at 0%, Infinity if unreachable <=500%
+function requiredReturn(targetCapital, startingCapital, monthlyContribution, months){
+  if(!(targetCapital>0) || !(months>0)) return null;
+  const P=n0(startingCapital), C=Math.max(0,n0(monthlyContribution));
+  if(fvWith(P,C,0,months) >= targetCapital) return 0;
+  let lo=0, hi=5;
+  if(fvWith(P,C,hi,months) < targetCapital) return Infinity;   // can't reach even at 500%/yr
+  for(let k=0;k<120;k++){ const mid=(lo+hi)/2; if(fvWith(P,C,mid,months)>=targetCapital) hi=mid; else lo=mid; }
+  return hi;
+}
+// simple compounding required-CAGR (no contributions) — kept for reference/tests
+function requiredCagr(targetCapital, projectedNow, monthsRemaining){
+  if(!(targetCapital>0)) return null;
+  if(!(projectedNow>0) || monthsRemaining<=0) return null;
+  const monthlyRate = Math.pow(targetCapital/projectedNow, 1/monthsRemaining) - 1;
+  return Math.pow(1+monthlyRate,12) - 1;
+}
+
+// ---- growth projection (monthly compounding; dividends reinvested in accumulation) ----
+function projectToTarget(p){
+  const targetCapital = p.targetCapital;
+  if(!(targetCapital>0)) return {series:[], reachable:false, hitYear:null, monthsToHit:null};
+  const monthlyRate = (n0(p.netBlendedYieldPct) + n0(p.expectedGrowthPct))/100/12;
+  const contribution = Math.max(0, n0(p.monthlyContribution));
+  const startYear = p.startYear;
+  const maxYears = p.maxYears || 60;
+  let v = Math.max(0, n0(p.currentValue));
+  const series=[{year:startYear, value:v}];
+  let hitYear=null, monthsToHit=null, months=0;
+  for(let y=1; y<=maxYears; y++){
+    for(let m=0;m<12;m++){ v = v*(1+monthlyRate) + contribution; months++;
+      if(hitYear===null && v>=targetCapital){ hitYear=startYear+y; monthsToHit=months; } }   // months = elapsed months at crossing
+    series.push({year:startYear+y, value:v});
+    if(hitYear!==null && (startYear+y) >= Math.max(hitYear, p.targetYear||0)) break;
+  }
+  return {series, reachable:hitYear!==null, hitYear, monthsToHit};
+}
+
+// ---- allocation vs framework ----
+function bucketOf(h){
+  if(h.asset_class==="bond") return "cash";
+  if(h.stock_type==="none" || !h.stock_type) return "cash";
+  return h.stock_type;   // dividend_grower|compounder|high_yield|defensive
+}
+function currentAllocation(holdings){
+  const sums={compounder:0,dividend_grower:0,high_yield:0,defensive:0,cash:0};
+  let total=0;
+  holdings.forEach(h=>{ const v=nn(h.value_thb); sums[bucketOf(h)] += v; total += v; });
+  const pct={};
+  BUCKETS.forEach(b=> pct[b] = total>0 ? sums[b]/total*100 : 0);
+  return {sums, total, pct};
+}
+function targetAllocationFor(requiredReturnPct){
+  if(!Number.isFinite(requiredReturnPct)) return {brake:true, name:"เกินเอื้อม", a:null};
+  for(const band of TARGET_ALLOCATION){ if(requiredReturnPct<=band.max) return {brake:false, name:band.name, a:band.a, max:band.max}; }
+  return {brake:true, name:"เกินกรอบ", a:null};
+}
+function allocationDrift(currentPct, targetA){
+  const drift={};
+  BUCKETS.forEach(b=> drift[b] = (currentPct[b]||0) - (targetA?targetA[b]:0));
+  return drift;
+}
+function glidePathStatus(goal, settings, nowYear){
+  const yearsLeft = goal.target_year - nowYear;
+  const active = yearsLeft>=0 && yearsLeft <= n0(settings.glide_years);
+  return { yearsLeft, active,
+    message: active ? "ใกล้เป้าหมาย ("+yearsLeft+" ปี) — ค่อยๆ ย้ายน้ำหนักจาก Growth → Dividend + Defensive เพื่อลด sequence-of-returns risk" : null };
+}
+
+// ---- whole-portfolio aggregates (state-level) ----
+function netWorthBreakdown(state){
+  const invest = state.investing.holdings.reduce((s,h)=>s+nn(h.value_thb),0);
+  let reEquity=0, mortgage=0, reGross=0;
+  state.real_estate.properties.forEach(p=>{ reGross += n0(p.market_value_thb);
+    reEquity += n0(p.market_value_thb)-n0(p.mortgage_outstanding_thb); mortgage += n0(p.mortgage_outstanding_thb); });
+  let insCash=0;
+  state.insurance.policies.forEach(p=>{ if(p.counts_toward_networth) insCash += n0(p.cash_value_thb); });
+  // gross assets at market value (incl. underwater props) − debt = net worth. invest+reGross+insCash − mortgage === total.
+  return { invest, reEquity, reGross, insCash, mortgage, total: invest+reEquity+insCash };
+}
+function passiveMonthly(state){
+  const div = portfolioTotals(state.investing.holdings, state.settings.wht_pct).netMonthlyDividend;
+  let rent=0;
+  state.real_estate.properties.forEach(p=>{ if(p.counts_toward_passive) rent += n0(p.rental_income_monthly_thb)-n0(p.rental_expense_monthly_thb); });
+  return { dividend:div, rent, total:div+rent };
+}
+
+// ---- derived bundle used by render + prompts (single computation point) ----
+function deriveInvesting(state, nowMonth){
+  const g=state.goal, s=state.settings;
+  const totals = portfolioTotals(state.investing.holdings, s.wht_pct);
+  const nest = targetNestEgg(g, totals);
+  const base = g.starting_capital_thb>0 ? g.starting_capital_thb : totals.totalValue;
+  const months = monthsBetween(nowMonth, g.target_year+"-12");
+  const rr = (nest!=null) ? requiredReturn(nest, base, g.monthly_contribution_thb, months) : null;
+  const rrPct = (rr==null)?null:(rr===Infinity?Infinity:rr*100);
+  const target = (rrPct==null)?{brake:false,a:null,name:"—"}:targetAllocationFor(rrPct);
+  const curAlloc = currentAllocation(state.investing.holdings);
+  const drift = target.a ? allocationDrift(curAlloc.pct, target.a) : null;
+  const proj = (nest!=null) ? projectToTarget({
+    currentValue:base, netBlendedYieldPct:totals.netBlendedYieldPct, expectedGrowthPct:g.expected_growth_pct,
+    monthlyContribution:g.monthly_contribution_thb, targetCapital:nest,
+    startYear:Number(nowMonth.split("-")[0]), targetYear:g.target_year }) : {series:[],reachable:false,hitYear:null};
+  const glide = glidePathStatus(g, s, Number(nowMonth.split("-")[0]));
+  const conc = concentration(state.investing.holdings, s.concentration_threshold_pct);
+  // needsInput: no starting capital AND no contribution yet → target is unreachable for a trivial reason,
+  // not because the goal is too aggressive. Distinguish so we show a friendly hint, not a BRAKE warning.
+  const needsInput = !(base>0) && !(g.monthly_contribution_thb>0);
+  return { totals, nest, base, months, rr, rrPct, target, curAlloc, drift, proj, glide, conc, needsInput };
+}
+
+/* ===================================================== SECTION 3 — PROMPTS (string builders, no API) */
+function buildAssessPrompt(state, nowMonth){
+  const d = deriveInvesting(state, nowMonth);
+  const g = state.goal;
+  const L=[];
+  L.push("ช่วยประเมินคุณภาพพอร์ตลงทุนของฉันและอัปเดตข่าวที่เกี่ยวข้องรายตัว โดยใช้ข้อมูลด้านล่าง");
+  L.push("");
+  L.push("== เป้าหมาย ==");
+  L.push("- รายได้เกษียณที่ต้องการ: "+fmtTHB(g.target_monthly_thb)+"/เดือน ภายในปี "+(g.target_year+543)+" (ค.ศ. "+g.target_year+")");
+  L.push("- วิธีคำนวณก้อนเป้าหมาย: "+LABELS.nestegg_method[g.nestegg_method]+" → ก้อนเป้าหมาย ≈ "+(d.nest!=null?fmtTHB(d.nest):"—"));
+  L.push("- เงินตั้งต้น "+fmtTHB(d.base)+" · เติมเดือนละ "+fmtTHB(g.monthly_contribution_thb)+" · คาดการเติบโตราคา "+g.expected_growth_pct+"%/ปี");
+  L.push("- ผลตอบแทนที่ต้องการเพื่อถึงเป้า: "+(d.rrPct==null?"—":d.rrPct===Infinity?"สูงเกินเอื้อม (ต้องปรับ input)":d.rrPct.toFixed(1)+"%/ปี"));
+  if(d.target && !d.target.brake && d.target.a){
+    L.push("- กรอบสัดส่วนเป้าหมาย ("+d.target.name+"): "+BUCKETS.map(b=>BUCKET_LABEL[b]+" "+d.target.a[b]+"%").join(" · "));
+  } else if(d.target && d.target.brake){ L.push("- ⚠️ "+BRAKE_MSG); }
+  L.push("");
+  L.push("== พอร์ตปัจจุบัน (รวม "+fmtTHB(d.totals.totalValue)+", net yield "+d.totals.netBlendedYieldPct.toFixed(2)+"%) ==");
+  if(state.investing.holdings.length===0){ L.push("(ยังไม่มีรายการ)"); }
+  else state.investing.holdings.forEach(h=>{
+    L.push("- "+h.name+(h.ticker?" ("+h.ticker+")":"")+" · ประเภท: "+LABELS.stock_type[h.stock_type]+" · มูลค่า "+fmtTHB(h.value_thb)
+      +" · yield "+n0(h.yield_pct)+"%"+(h.quality_score!=null?" · คะแนนคุณภาพ "+h.quality_score+"/12":"")
+      +(h.valuation_verdict&&h.valuation_verdict!=="unknown"?" · ราคา:"+LABELS.valuation_verdict[h.valuation_verdict]:"")+" · ตลาด:"+LABELS.market[h.market]);
+  });
+  L.push("");
+  if(d.drift){
+    L.push("== สัดส่วนปัจจุบัน vs เป้าหมาย (drift) ==");
+    BUCKETS.forEach(b=>{ const dr=d.drift[b]; L.push("- "+BUCKET_LABEL[b]+": ปัจจุบัน "+d.curAlloc.pct[b].toFixed(0)+"% (เป้า "+d.target.a[b]+"%, "+(dr>=0?"+":"")+dr.toFixed(0)+")"); });
+    L.push("");
+  }
+  if(d.conc.flagged) L.push("⚠️ กระจุกตัว: "+d.conc.topName+" ถือ "+d.conc.topSharePct.toFixed(0)+"% ของพอร์ต");
+  L.push("");
+  L.push("== สิ่งที่อยากให้ช่วย ==");
+  L.push("1) ประเมินคุณภาพพอร์ตโดยรวม จุดแข็ง/จุดอ่อน");
+  L.push("2) ชี้การกระจุกตัวและ drift จากสัดส่วนเป้าหมาย พร้อมแนวทางปรับ");
+  L.push("3) สรุปข่าว/พัฒนาการล่าสุดที่มีนัยต่อหุ้นแต่ละตัวข้างต้น (ระบุวันที่/แหล่งถ้าทำได้)");
+  L.push("");
+  L.push(DISCLAIMER_TH);
+  return L.join("\n");
+}
+
+function buildDiscoverPrompt(state, nowMonth){
+  const d = deriveInvesting(state, nowMonth);
+  const g = state.goal;
+  const L=[];
+  L.push("ช่วยหาหุ้นที่น่าสนใจสำหรับฉัน ตามกรอบให้คะแนนด้านล่าง โดยเน้นเติมส่วนที่พอร์ตยังขาด");
+  L.push("");
+  L.push("== บริบทเป้าหมาย ==");
+  L.push("- ผลตอบแทนที่ต้องการ: "+(d.rrPct==null?"—":d.rrPct===Infinity?"สูงเกินเอื้อม":d.rrPct.toFixed(1)+"%/ปี")+" · ขอบฟ้าเวลา ~"+Math.max(0,Math.round(d.months/12))+" ปี");
+  // under-weight buckets
+  let under=[];
+  if(d.drift){ under = BUCKETS.filter(b=>b!=="cash" && d.drift[b] < -2)
+      .sort((a,b)=>d.drift[a]-d.drift[b]).map(b=>BUCKET_LABEL[b]+" (ขาด "+Math.abs(d.drift[b]).toFixed(0)+"%)"); }
+  L.push("- ประเภทที่พอร์ตยัง under-weight: "+(under.length?under.join(" · "):"(ยังไม่มีพอร์ต/ครบแล้ว — เสนอได้ทุกประเภท)"));
+  // market preference from holdings
+  const mk={}; state.investing.holdings.forEach(h=>mk[h.market]=(mk[h.market]||0)+1);
+  const mkPref = Object.keys(mk).length? Object.keys(mk).sort((a,b)=>mk[b]-mk[a]).map(m=>LABELS.market[m]).join("/") : "ไม่จำกัด";
+  L.push("- ตลาดที่สนใจ: "+mkPref);
+  L.push("");
+  L.push(SCORING_FRAMEWORK);
+  L.push("");
+  L.push("== สิ่งที่อยากให้ช่วย ==");
+  L.push("เสนอหุ้น 5–10 ตัวที่ (ก) ผ่านด่านกลางทุกข้อ (ข) ได้คะแนนคุณภาพสูง (10–12) ในประเภทที่ฉันยังขาด");
+  L.push("(ค) ราคาปัจจุบันถูก/เหมาะ (ไม่แพง) — สำหรับแต่ละตัวให้บอก: ประเภท, เหตุผลที่ผ่าน gate, คะแนนคร่าวๆ, และระดับราคา");
+  L.push("");
+  L.push(DISCLAIMER_TH);
+  return L.join("\n");
+}
+
+/* ===================================================== SECTION 4 — RENDER */
+const $ = sel => document.querySelector(sel);
+function fmtTHB(n){ if(n==null||!Number.isFinite(n)) return "—";
+  return new Intl.NumberFormat("th-TH",{style:"currency",currency:"THB",maximumFractionDigits:0}).format(n); }
+function fmtNum(n,d){ if(n==null||!Number.isFinite(n)) return "—"; return n.toLocaleString("th-TH",{maximumFractionDigits:d==null?0:d}); }
+function fmtPct(n,d){ if(n==null||!Number.isFinite(n)) return "—"; return n.toFixed(d==null?1:d)+"%"; }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c])); }
+
+function renderTabs(){
+  $("#tabs").innerHTML = TABS.map(t=>
+    `<button class="tab" role="tab" data-tab="${t.id}" aria-selected="${t.id===ACTIVE_TAB}">
+       <span class="ic">${t.ic}</span>${t.label}</button>`).join("");
+}
+
+function render(tab){
+  ACTIVE_TAB = tab || ACTIVE_TAB;
+  renderTabs();
+  const v = $("#view");
+  if(STATE && STATE.meta && !STATE.meta.onboarded){ renderOnboarding(v); return; }
+  if(ACTIVE_TAB==="dashboard") renderDashboard(v);
+  else if(ACTIVE_TAB==="investing") renderInvesting(v);
+  else if(ACTIVE_TAB==="realestate") renderRealEstate(v);
+  else if(ACTIVE_TAB==="insurance") renderInsurance(v);
+}
+
+function renderOnboarding(v){
+  v.innerHTML = `
+  <div class="card" style="text-align:center;max-width:560px;margin:30px auto">
+    <div style="font-size:46px">฿</div>
+    <h2 style="font-size:22px;margin:8px 0">ยินดีต้อนรับสู่ Asset Manager</h2>
+    <p class="muted" style="margin:8px auto 18px;max-width:440px">
+      เครื่องมือบริหารสินทรัพย์ส่วนตัว 4 ด้าน: การลงทุน · อสังหาริมทรัพย์ · ประกัน และภาพรวมเกษียณ<br>
+      ข้อมูลทั้งหมดเก็บใน<b>เครื่องนี้เท่านั้น</b> — ย้ายข้ามเครื่องด้วยปุ่ม Export/Import</p>
+    <div class="grid cols-2" style="max-width:420px;margin:0 auto">
+      <button class="btn primary block" id="ob-start">เริ่มใช้ค่าเริ่มต้น</button>
+      <button class="btn block" id="ob-import">นำเข้าไฟล์สำรอง</button>
+    </div>
+    <p class="disc">ค่าเริ่มต้น: เป้า ฿100,000/เดือน ภายในปี 2583 · ภาษีหัก ณ ที่จ่ายปันผล 10% · ยังไม่มีรายการสินทรัพย์</p>
+  </div>`;
+  $("#ob-start").onclick = ()=>{ const ns=structuredCloneSafe(STATE); ns.meta.onboarded=true; commit(ns); };
+  $("#ob-import").onclick = ()=> $("#file-import").click();
+}
+
+// ---------- DASHBOARD ----------
+function renderDashboard(v){
+  const nw = netWorthBreakdown(STATE);
+  const pm = passiveMonthly(STATE);
+  const g = STATE.goal;
+  const prog = g.target_monthly_thb>0 ? Math.min(100, pm.total/g.target_monthly_thb*100) : 0;
+  const d = deriveInvesting(STATE, currentMonth());
+
+  const segs = [
+    {label:"การลงทุน", value:Math.max(0,nw.invest), color:"var(--c-invest)"},
+    {label:"อสังหา (equity)", value:Math.max(0,nw.reEquity), color:"var(--c-realestate)"},
+    {label:"ประกัน (มูลค่าเงินสด)", value:Math.max(0,nw.insCash), color:"var(--c-insurance)"},
+  ].filter(s=>s.value>0);
+
+  const warns=[];
+  if(d.target && d.target.brake && !d.needsInput) warns.push(`<div class="banner bad"><span class="bi">⚠️</span><div><b>ผลตอบแทนที่ต้องการสูงเกินไป</b><br>${esc(BRAKE_MSG)}</div></div>`);
+  if(d.glide && d.glide.active) warns.push(`<div class="banner info"><span class="bi">🛬</span><div><b>เข้าสู่ช่วง glide path</b><br>${esc(d.glide.message)}</div></div>`);
+  if(d.conc && d.conc.flagged) warns.push(`<div class="banner warn"><span class="bi">🎯</span><div><b>พอร์ตกระจุกตัว</b> — ${esc(d.conc.topName)} คิดเป็น ${d.conc.topSharePct.toFixed(0)}% ของพอร์ตลงทุน</div></div>`);
+
+  v.innerHTML = `
+  <div class="grid cols-2">
+    <div class="card stat hero">
+      <div class="label">มูลค่าสินทรัพย์สุทธิ (Net Worth)</div>
+      <div class="value">${fmtTHB(nw.total)}</div>
+      <div class="hint">สินทรัพย์รวม ${fmtTHB(nw.invest+nw.reGross+nw.insCash)} − หนี้สิน (จำนอง) ${fmtTHB(nw.mortgage)}</div>
+    </div>
+    <div class="card">
+      <div class="label" style="font-size:12.5px;color:var(--muted)">รายได้ passive ต่อเดือน · เป้า ${fmtTHB(g.target_monthly_thb)}</div>
+      <div class="value" style="font-size:21px;font-weight:800;margin:3px 0 10px">${fmtTHB(pm.total)} <small class="muted" style="font-size:13px">(${prog.toFixed(0)}%)</small></div>
+      <div class="progress"><i style="width:${prog}%"></i></div>
+      <div class="legend"><span>💵 ปันผลสุทธิ ${fmtTHB(pm.dividend)}</span><span>🏠 ค่าเช่าสุทธิ ${fmtTHB(pm.rent)}</span></div>
+    </div>
+  </div>
+
+  ${warns.length? `<div class="grid">${warns.join("")}</div>`:""}
+
+  <div class="grid cols-2">
+    <div class="card">
+      <div class="card-head"><h2>สัดส่วนสินทรัพย์</h2></div>
+      ${segs.length? `<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
+          ${donutSVG(segs,150,30)}
+          <div style="flex:1;min-width:160px">
+            ${segs.map(s=>`<div class="kv"><span class="k"><span class="type-dot" style="background:${s.color}"></span>${esc(s.label)}</span><span class="v">${fmtTHB(s.value)}</span></div>`).join("")}
+          </div></div>`
+        : `<div class="empty"><div class="big">📊</div>ยังไม่มีข้อมูลสินทรัพย์ — เริ่มเพิ่มได้ที่แท็บการลงทุน/อสังหา/ประกัน</div>`}
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>ทางลัด</h2></div>
+      <div class="grid" style="gap:9px">
+        <button class="btn block" data-goto="investing">📈 จัดการพอร์ตลงทุน & เป้าหมาย</button>
+        <button class="btn block" data-goto="realestate">🏠 อสังหาริมทรัพย์</button>
+        <button class="btn block" data-goto="insurance">🛡️ ประกัน</button>
+      </div>
+      <div class="divider" style="margin:14px 0"></div>
+      <div class="kv"><span class="k">เงินลงทุน</span><span class="v">${fmtTHB(nw.invest)}</span></div>
+      <div class="kv"><span class="k">อสังหา (equity)</span><span class="v">${fmtTHB(nw.reEquity)}</span></div>
+      <div class="kv"><span class="k">ประกัน (มูลค่าเงินสด)</span><span class="v">${fmtTHB(nw.insCash)}</span></div>
+      <div class="kv"><span class="k">หนี้จำนองคงเหลือ</span><span class="v" style="color:var(--red)">−${fmtTHB(nw.mortgage)}</span></div>
+    </div>
+  </div>
+  <p class="disc">ตัวเลขประมาณการ ไม่ใช่คำแนะนำการลงทุน</p>`;
+
+  v.querySelectorAll("[data-goto]").forEach(b=> b.onclick=()=>render(b.dataset.goto));
+}
+
+// ---------- INVESTING ----------
+function renderInvesting(v){
+  const d = deriveInvesting(STATE, currentMonth());
+  const g = STATE.goal, s = STATE.settings;
+  const t = d.totals;
+
+  // holdings table
+  let holdRows;
+  if(STATE.investing.holdings.length===0){
+    holdRows = `<div class="empty"><div class="big">📈</div>ยังไม่มีหุ้น/สินทรัพย์ลงทุน — กด “+ เพิ่มรายการ”</div>`;
+  } else {
+    holdRows = `<table class="tbl responsive"><thead><tr>
+      <th>ชื่อ</th><th>ประเภท</th><th class="num">มูลค่า</th><th class="num">yield</th>
+      <th class="num">ปันผลสุทธิ/เดือน</th><th class="num">YoC</th><th>ราคา</th><th></th></tr></thead><tbody>
+      ${STATE.investing.holdings.map(h=>{
+        const yoc=holdingYieldOnCost(h);
+        return `<tr>
+          <td data-label="ชื่อ"><b>${esc(h.name)}</b>${h.ticker?` <small class="muted">${esc(h.ticker)}</small>`:""}</td>
+          <td data-label="ประเภท"><span class="type-dot" style="background:${BUCKET_COLOR[bucketOf(h)]}"></span>${esc(LABELS.stock_type[h.stock_type])}</td>
+          <td class="num" data-label="มูลค่า">${fmtTHB(h.value_thb)}</td>
+          <td class="num" data-label="yield">${fmtPct(h.yield_pct)}</td>
+          <td class="num" data-label="ปันผลสุทธิ/เดือน">${fmtTHB(holdingNetMonthly(h,s.wht_pct))}</td>
+          <td class="num" data-label="YoC">${yoc==null?"—":fmtPct(yoc)}</td>
+          <td data-label="ราคา">${h.valuation_verdict==="unknown"?"<small class='muted'>—</small>":esc(LABELS.valuation_verdict[h.valuation_verdict])}</td>
+          <td class="row-actions-cell"><div class="row-actions">
+            <button class="btn sm" data-edit-h="${h.id}">แก้</button>
+            <button class="btn sm danger" data-del-h="${h.id}">ลบ</button></div></td>
+        </tr>`;}).join("")}
+    </tbody></table>`;
+  }
+
+  // allocation bars
+  let allocHTML="";
+  if(d.target && d.target.a){
+    allocHTML = BUCKETS.map(b=>{
+      const cur=d.curAlloc.pct[b]||0, tgt=d.target.a[b]||0;
+      return `<div class="allocbar">
+        <div><span class="type-dot" style="background:${BUCKET_COLOR[b]}"></span>${BUCKET_LABEL[b]}</div>
+        <div class="track"><div class="cur" style="width:${Math.min(100,cur)}%;background:${BUCKET_COLOR[b]}"></div><div class="tgt" style="left:${Math.min(100,tgt)}%"></div></div>
+        <div style="text-align:right">${cur.toFixed(0)}% <small class="muted">/ ${tgt}%</small></div>
+      </div>`;}).join("");
+  }
+
+  v.innerHTML = `
+  <!-- goal + results -->
+  <div class="card">
+    <div class="card-head"><h2>เป้าหมายเกษียณ <span class="sub">ปรับได้ทุกค่า</span></h2></div>
+    <div class="goalform">
+      ${gInput("target_monthly_thb","รายได้/เดือนที่ต้องการ (฿)",g.target_monthly_thb)}
+      ${gInput("target_year","ปีเป้าหมาย (ค.ศ.)",g.target_year)}
+      ${gSelectMethod(g.nestegg_method)}
+      ${gInput("starting_capital_thb","เงินตั้งต้น (฿)",g.starting_capital_thb,"ว่าง = ใช้มูลค่าพอร์ตปัจจุบัน")}
+      ${gInput("monthly_contribution_thb","เติมเดือนละ (฿)",g.monthly_contribution_thb)}
+      ${gInput("expected_growth_pct","คาดการเติบโตราคา (%/ปี)",g.expected_growth_pct)}
+      ${gInputS("wht_pct","ภาษีหัก ณ ที่จ่ายปันผล (%)",s.wht_pct)}
+    </div>
+    <div id="inv-results">${renderInvestingResults(d)}</div>
+  </div>
+
+  <!-- holdings -->
+  <div class="card">
+    <div class="card-head"><h2>พอร์ตการลงทุน <span class="sub">${t.count} รายการ · รวม ${fmtTHB(t.totalValue)}</span></h2>
+      <button class="btn primary sm" id="add-holding">+ เพิ่มรายการ</button></div>
+    <div class="grid cols-4" style="margin-bottom:14px">
+      <div class="stat"><div class="label">มูลค่ารวม</div><div class="value sm">${fmtTHB(t.totalValue)}</div></div>
+      <div class="stat"><div class="label">ปันผลสุทธิ/เดือน</div><div class="value sm">${fmtTHB(t.netMonthlyDividend)}</div></div>
+      <div class="stat"><div class="label">Net yield เฉลี่ย</div><div class="value sm">${fmtPct(t.netBlendedYieldPct,2)}</div></div>
+      <div class="stat"><div class="label">Yield on cost</div><div class="value sm">${t.yieldOnCostPct==null?"—":fmtPct(t.yieldOnCostPct,2)}</div></div>
+    </div>
+    ${holdRows}
+  </div>
+
+  <!-- allocation vs framework -->
+  <div class="card">
+    <div class="card-head"><h2>สัดส่วนพอร์ต vs กรอบเป้าหมาย <span class="sub">${(!d.needsInput&&d.target&&d.target.a)?esc(d.target.name):"—"}</span></h2></div>
+    ${d.needsInput
+      ? `<div class="banner info"><span class="bi">💡</span><div>กรอก <b>เงินตั้งต้น</b> หรือ <b>เงินเติมรายเดือน</b> (และเพิ่มหุ้นในพอร์ต) เพื่อคำนวณผลตอบแทนที่ต้องการและสัดส่วนพอร์ตเป้าหมาย</div></div>`
+      : (d.target&&d.target.brake
+        ? `<div class="banner bad"><span class="bi">⚠️</span><div><b>BRAKE</b> — ${esc(BRAKE_MSG)}</div></div>`
+        : (allocHTML?allocHTML+`<div class="legend"><span>▮ แท่ง = สัดส่วนปัจจุบัน</span><span>│ เส้น = เป้าหมาย</span></div>`
+          :`<div class="muted">เพิ่มหุ้นและตั้งประเภทเพื่อดูสัดส่วน</div>`))}
+  </div>
+
+  <!-- AI prompts -->
+  <div class="card">
+    <div class="card-head"><h2>ส่งข้อมูลให้ AI ช่วย <span class="sub">สร้าง prompt ไปวางในแชต AI</span></h2></div>
+    <div class="grid cols-2">
+      <button class="btn block" id="prompt-assess">🔎 ประเมินพอร์ต + อัปเดตข่าว</button>
+      <button class="btn block" id="prompt-discover">🧭 หาหุ้นที่น่าสนใจ (ตามกรอบคะแนน)</button>
+    </div>
+  </div>
+  <p class="disc">ไม่ใช่คำแนะนำการลงทุน — ตัวเลขประมาณการ</p>`;
+
+  wireInvestingEvents();
+}
+
+function renderInvestingResults(d){
+  const rrTxt = d.needsInput ? "—" : (d.rrPct==null ? "—" : (d.rrPct===Infinity ? "<span style='color:var(--red)'>เกินเอื้อม</span>" : fmtPct(d.rrPct,1)));
+  const rrHint = d.needsInput ? "กรอกเงินตั้งต้น/เงินเติม" : "รวมเงินเติมแล้ว";
+  const hit = d.needsInput ? "—" : (d.proj && d.proj.reachable ? ("ปี "+(d.proj.hitYear+543)+" (ค.ศ. "+d.proj.hitYear+")") :
+              (d.nest==null?"—":"<span style='color:var(--amber)'>ยังไม่ถึงตามสมมติฐาน</span>"));
+  return `
+    <div class="grid cols-4" style="margin-top:6px">
+      <div class="stat"><div class="label">ก้อนเป้าหมาย</div><div class="value sm">${fmtTHB(d.nest)}</div><div class="hint">${d.nest!=null?LABELS.nestegg_method[STATE.goal.nestegg_method]:"ตั้งค่ายังไม่พอ"}</div></div>
+      <div class="stat"><div class="label">ผลตอบแทนที่ต้องการ</div><div class="value sm">${rrTxt}<small class="muted" style="font-size:12px">/ปี</small></div><div class="hint">${rrHint}</div></div>
+      <div class="stat"><div class="label">คาดถึงเป้าหมาย</div><div class="value sm" style="font-size:15px">${hit}</div></div>
+      <div class="stat"><div class="label">เหลือเวลา</div><div class="value sm">${Math.max(0,Math.round(d.months/12))} ปี</div><div class="hint">${d.months} เดือน</div></div>
+    </div>
+    ${d.proj && d.proj.series.length>1 ? `<div style="margin-top:14px">${projectionSVG(d.proj.series, d.nest)}</div>`:""}
+    ${d.glide && d.glide.active?`<div class="banner info" style="margin-top:12px"><span class="bi">🛬</span><div>${esc(d.glide.message)}</div></div>`:""}`;
+}
+
+function gInput(key,label,val,hint){
+  return `<div class="field"><label>${label}</label>
+    <input type="number" inputmode="decimal" data-goal="${key}" value="${val}" />
+    ${hint?`<span class="hint">${hint}</span>`:""}</div>`;
+}
+function gInputS(key,label,val){
+  return `<div class="field"><label>${label}</label>
+    <input type="number" inputmode="decimal" data-setting="${key}" value="${val}" /></div>`;
+}
+function gSelectMethod(cur){
+  return `<div class="field"><label>วิธีคำนวณก้อนเป้าหมาย</label>
+    <select data-goal="nestegg_method">
+      ${ENUMS.nestegg_method.map(m=>`<option value="${m}" ${m===cur?"selected":""}>${LABELS.nestegg_method[m]}</option>`).join("")}
+    </select></div>`;
+}
+
+// ---------- REAL ESTATE ----------
+function renderRealEstate(v){
+  const props = STATE.real_estate.properties;
+  let totVal=0,totMort=0,totRentNet=0,totPay=0;
+  props.forEach(p=>{ totVal+=n0(p.market_value_thb); totMort+=n0(p.mortgage_outstanding_thb);
+    totRentNet+=(p.counts_toward_passive?(n0(p.rental_income_monthly_thb)-n0(p.rental_expense_monthly_thb)):0); totPay+=n0(p.monthly_payment_thb); });
+  const equity=totVal-totMort;
+
+  let rows;
+  if(props.length===0){ rows=`<div class="empty"><div class="big">🏠</div>ยังไม่มีอสังหาริมทรัพย์ — กด “+ เพิ่มทรัพย์สิน”</div>`; }
+  else rows = `<table class="tbl responsive"><thead><tr>
+    <th>ทรัพย์สิน</th><th>ประเภท</th><th class="num">มูลค่า</th><th class="num">จำนองคงเหลือ</th>
+    <th class="num">Equity</th><th class="num">ค่าเช่าสุทธิ/ด.</th><th class="num">LTV</th><th></th></tr></thead><tbody>
+    ${props.map(p=>{ const eq=n0(p.market_value_thb)-n0(p.mortgage_outstanding_thb);
+      const netRent=n0(p.rental_income_monthly_thb)-n0(p.rental_expense_monthly_thb);
+      const ltv=n0(p.market_value_thb)>0?n0(p.mortgage_outstanding_thb)/n0(p.market_value_thb)*100:0;
+      return `<tr>
+        <td data-label="ทรัพย์สิน"><b>${esc(p.name)}</b>${p.counts_toward_passive&&netRent!==0?` <span class="chip good" style="padding:2px 7px">passive</span>`:""}</td>
+        <td data-label="ประเภท">${esc(LABELS.property_type[p.property_type])}</td>
+        <td class="num" data-label="มูลค่า">${fmtTHB(p.market_value_thb)}</td>
+        <td class="num" data-label="จำนองคงเหลือ">${fmtTHB(p.mortgage_outstanding_thb)}</td>
+        <td class="num" data-label="Equity"><b>${fmtTHB(eq)}</b></td>
+        <td class="num" data-label="ค่าเช่าสุทธิ/ด.">${fmtTHB(netRent)}</td>
+        <td class="num" data-label="LTV">${ltv>0?fmtPct(ltv,0):"—"}</td>
+        <td class="row-actions-cell"><div class="row-actions">
+          <button class="btn sm" data-edit-re="${p.id}">แก้</button>
+          <button class="btn sm danger" data-del-re="${p.id}">ลบ</button></div></td>
+      </tr>`;}).join("")}
+  </tbody></table>`;
+
+  v.innerHTML = `
+  <div class="grid cols-4">
+    <div class="stat card"><div class="label">มูลค่ารวม</div><div class="value sm">${fmtTHB(totVal)}</div></div>
+    <div class="stat card"><div class="label">Equity (→ net worth)</div><div class="value sm">${fmtTHB(equity)}</div></div>
+    <div class="stat card"><div class="label">ค่าเช่าสุทธิ/เดือน (→ passive)</div><div class="value sm">${fmtTHB(totRentNet)}</div></div>
+    <div class="stat card"><div class="label">ผ่อนจ่าย/เดือน</div><div class="value sm" style="color:var(--red)">${fmtTHB(totPay)}</div></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>อสังหาริมทรัพย์ <span class="sub">${props.length} รายการ</span></h2>
+      <button class="btn primary sm" id="add-re">+ เพิ่มทรัพย์สิน</button></div>
+    ${rows}
+  </div>
+  <p class="disc">Equity = มูลค่าตลาด − จำนองคงเหลือ · ค่าเช่าสุทธิ = ค่าเช่า − ค่าใช้จ่าย · ไม่ใช่คำแนะนำการลงทุน</p>`;
+
+  $("#add-re").onclick=()=>openItemForm("property",null);
+  v.querySelectorAll("[data-edit-re]").forEach(b=>b.onclick=()=>openItemForm("property",findById(STATE.real_estate.properties,b.dataset.editRe)));
+  v.querySelectorAll("[data-del-re]").forEach(b=>b.onclick=()=>deleteItem("property",b.dataset.delRe));
+}
+
+// ---------- INSURANCE ----------
+function renderInsurance(v){
+  const pol = STATE.insurance.policies;
+  let sumProtect=0,prem=0,cash=0,taxDed=0;
+  const today=currentMonth();
+  pol.forEach(p=>{ if(p.policy_type==="life"||p.policy_type==="health") sumProtect+=n0(p.sum_insured_thb);
+    prem+=n0(p.annual_premium_thb); if(p.counts_toward_networth) cash+=n0(p.cash_value_thb);
+    if(p.tax_deductible) taxDed+=n0(p.annual_premium_thb); });
+
+  // maturity timeline (sorted)
+  const withMat = pol.filter(p=>p.maturity_date).sort((a,b)=>String(a.maturity_date).localeCompare(String(b.maturity_date)));
+
+  let rows;
+  if(pol.length===0){ rows=`<div class="empty"><div class="big">🛡️</div>ยังไม่มีกรมธรรม์ — กด “+ เพิ่มกรมธรรม์”</div>`; }
+  else rows = `<table class="tbl responsive"><thead><tr>
+    <th>กรมธรรม์</th><th>ประเภท</th><th class="num">ทุนประกัน</th><th class="num">เบี้ย/ปี</th>
+    <th class="num">มูลค่าเงินสด</th><th>ครบกำหนด</th><th></th></tr></thead><tbody>
+    ${pol.map(p=>`<tr>
+      <td data-label="กรมธรรม์"><b>${esc(p.name)}</b>${p.insurer?` <small class="muted">${esc(p.insurer)}</small>`:""}${p.tax_deductible?` <span class="chip" style="padding:2px 7px">ลดหย่อนภาษี</span>`:""}</td>
+      <td data-label="ประเภท">${esc(LABELS.policy_type[p.policy_type])}</td>
+      <td class="num" data-label="ทุนประกัน">${fmtTHB(p.sum_insured_thb)}</td>
+      <td class="num" data-label="เบี้ย/ปี">${fmtTHB(p.annual_premium_thb)}</td>
+      <td class="num" data-label="มูลค่าเงินสด">${n0(p.cash_value_thb)>0?fmtTHB(p.cash_value_thb):"—"}</td>
+      <td data-label="ครบกำหนด">${p.maturity_date?esc(p.maturity_date):"—"}</td>
+      <td class="row-actions-cell"><div class="row-actions">
+        <button class="btn sm" data-edit-ins="${p.id}">แก้</button>
+        <button class="btn sm danger" data-del-ins="${p.id}">ลบ</button></div></td>
+    </tr>`).join("")}
+  </tbody></table>`;
+
+  v.innerHTML = `
+  <div class="grid cols-4">
+    <div class="stat card"><div class="label">ทุนคุ้มครอง (ชีวิต/สุขภาพ)</div><div class="value sm">${fmtTHB(sumProtect)}</div></div>
+    <div class="stat card"><div class="label">เบี้ยรวม/ปี</div><div class="value sm">${fmtTHB(prem)}</div></div>
+    <div class="stat card"><div class="label">มูลค่าเงินสด (→ net worth)</div><div class="value sm">${fmtTHB(cash)}</div></div>
+    <div class="stat card"><div class="label">เบี้ยลดหย่อนภาษี/ปี</div><div class="value sm">${fmtTHB(taxDed)}</div></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h2>กรมธรรม์ <span class="sub">${pol.length} รายการ</span></h2>
+      <button class="btn primary sm" id="add-ins">+ เพิ่มกรมธรรม์</button></div>
+    ${rows}
+  </div>
+  ${withMat.length? `<div class="card"><div class="card-head"><h2>ไทม์ไลน์ครบกำหนด</h2></div>
+    ${withMat.map(p=>`<div class="kv"><span class="k">${esc(p.maturity_date)} · ${esc(p.name)}</span><span class="v">${fmtTHB(p.sum_insured_thb||p.cash_value_thb)}</span></div>`).join("")}</div>`:""}
+  <p class="disc">มูลค่าเงินสดของประกันออมทรัพย์/บำนาญ/ยูนิตลิงค์เท่านั้นที่นับเป็น net worth · ประกันคุ้มครองล้วน (ชีวิต/สุขภาพ) มักมีมูลค่าเงินสด 0 · ไม่ใช่คำแนะนำการลงทุน</p>`;
+
+  $("#add-ins").onclick=()=>openItemForm("policy",null);
+  v.querySelectorAll("[data-edit-ins]").forEach(b=>b.onclick=()=>openItemForm("policy",findById(STATE.insurance.policies,b.dataset.editIns)));
+  v.querySelectorAll("[data-del-ins]").forEach(b=>b.onclick=()=>deleteItem("policy",b.dataset.delIns));
+}
+
+// ---------- SVG helpers ----------
+function donutSVG(segs, size, stroke){
+  const total = segs.reduce((s,x)=>s+x.value,0); if(total<=0) return "";
+  const r=(size-stroke)/2, cx=size/2, cy=size/2, C=2*Math.PI*r;
+  let off=0;
+  const circles = segs.map(s=>{ const len=s.value/total*C;
+    const c=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${stroke}"
+      stroke-dasharray="${len} ${C-len}" stroke-dashoffset="${-off}" transform="rotate(-90 ${cx} ${cy})"/>`;
+    off+=len; return c; }).join("");
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${circles}
+    <circle cx="${cx}" cy="${cy}" r="${r-stroke/2-1}" fill="var(--surface)"/></svg>`;
+}
+function projectionSVG(series, target){
+  const W=640, H=180, padL=8, padR=8, padT=14, padB=22;
+  const ys = series.map(p=>p.value).concat(target?[target]:[]);
+  const maxY = Math.max.apply(null, ys.concat([1]))*1.08;
+  const x = i => padL + (W-padL-padR) * (i/(series.length-1||1));
+  const y = val => padT + (H-padT-padB) * (1 - val/maxY);
+  const pts = series.map((p,i)=>x(i)+","+y(p.value)).join(" ");
+  const area = `${padL},${y(0)} ${pts} ${x(series.length-1)},${y(0)}`;
+  const tgtY = target?y(target):null;
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="display:block">
+    <polygon points="${area}" fill="var(--brand-soft)" opacity="0.5"/>
+    <polyline points="${pts}" fill="none" stroke="var(--brand)" stroke-width="2.5"/>
+    ${target?`<line x1="${padL}" y1="${tgtY}" x2="${W-padR}" y2="${tgtY}" stroke="var(--green)" stroke-width="1.5" stroke-dasharray="6 5"/>
+      <text x="${W-padR}" y="${Math.max(10,tgtY-4)}" text-anchor="end" font-size="11" fill="var(--green)">เป้า ${fmtTHB(target)}</text>`:""}
+    <text x="${padL}" y="${H-6}" font-size="11" fill="var(--muted)">${series[0].year+543}</text>
+    <text x="${W-padR}" y="${H-6}" text-anchor="end" font-size="11" fill="var(--muted)">${series[series.length-1].year+543}</text>
+  </svg>`;
+}
+
+/* ===================================================== SECTION 5 — EVENTS */
+function findById(arr,id){ return arr.find(x=>x.id===id); }
+function structuredCloneSafe(o){ return JSON.parse(JSON.stringify(o)); }
+
+// re-render whole investing tab but keep caret in the field the user is editing
+// (goal inputs affect results, allocation card AND portfolio totals — a partial re-render goes stale)
+function reRenderInvestingKeepFocus(){
+  const a=document.activeElement;
+  const gk=a&&a.dataset?a.dataset.goal:null, sk=a&&a.dataset?a.dataset.setting:null;
+  let pos=null; try{ pos=a&&typeof a.selectionStart==="number"?a.selectionStart:null; }catch(e){}
+  render("investing");
+  if(gk||sk){
+    const el=document.querySelector(gk?`[data-goal="${gk}"]`:`[data-setting="${sk}"]`);
+    if(el){ el.focus(); if(pos!=null){ try{ el.setSelectionRange(pos,pos); }catch(e){} } }
+  }
+}
+function wireInvestingEvents(){
+  const onInput=(obj,key,raw,isSelect)=>{
+    if(isSelect){ obj[key]=raw; }
+    else { const v = raw===""?0:Number(raw); if(!Number.isFinite(v)) return; obj[key]=v; } // never let NaN into STATE
+    persistDebounced();
+    reRenderInvestingKeepFocus();
+  };
+  document.querySelectorAll("[data-goal]").forEach(inp=>{
+    const ev = inp.tagName==="SELECT" ? "change" : "input";
+    inp.addEventListener(ev,()=> onInput(STATE.goal, inp.dataset.goal, inp.value, inp.tagName==="SELECT"));
+  });
+  document.querySelectorAll("[data-setting]").forEach(inp=>{
+    inp.addEventListener("input",()=> onInput(STATE.settings, inp.dataset.setting, inp.value, false));
+  });
+  $("#add-holding").onclick=()=>openItemForm("holding",null);
+  document.querySelectorAll("[data-edit-h]").forEach(b=>b.onclick=()=>openItemForm("holding",findById(STATE.investing.holdings,b.dataset.editH)));
+  document.querySelectorAll("[data-del-h]").forEach(b=>b.onclick=()=>deleteItem("holding",b.dataset.delH));
+  $("#prompt-assess").onclick=()=>showPrompt("ประเมินพอร์ต + อัปเดตข่าว", buildAssessPrompt(STATE,currentMonth()));
+  $("#prompt-discover").onclick=()=>showPrompt("หาหุ้นที่น่าสนใจ", buildDiscoverPrompt(STATE,currentMonth()));
+}
+
+// ---- entity form schemas ----
+const FORM_SCHEMAS = {
+  holding:{ title:"หุ้น / สินทรัพย์ลงทุน", coll:"investing.holdings", idp:"h",
+    fields:[
+      {k:"name",l:"ชื่อ",t:"text",req:true},
+      {k:"ticker",l:"Ticker",t:"text"},
+      {k:"asset_class",l:"ประเภทสินทรัพย์",t:"select",e:"asset_class"},
+      {k:"stock_type",l:"ประเภทตามกรอบ",t:"select",e:"stock_type"},
+      {k:"value_thb",l:"มูลค่าปัจจุบัน (฿)",t:"number",req:true},
+      {k:"yield_pct",l:"เงินปันผล/ผลตอบแทน (%)",t:"number"},
+      {k:"cost_basis_thb",l:"ต้นทุน (฿) — ไม่บังคับ",t:"number"},
+      {k:"quality_score",l:"คะแนนคุณภาพ 0–12 — ไม่บังคับ",t:"number"},
+      {k:"valuation_verdict",l:"ระดับราคา",t:"select",e:"valuation_verdict"},
+      {k:"market",l:"ตลาด",t:"select",e:"market"},
+      {k:"notes",l:"บันทึก",t:"textarea",full:true},
+    ]},
+  property:{ title:"อสังหาริมทรัพย์", coll:"real_estate.properties", idp:"re",
+    fields:[
+      {k:"name",l:"ชื่อ/ที่ตั้ง",t:"text",req:true},
+      {k:"property_type",l:"ประเภท",t:"select",e:"property_type"},
+      {k:"market_value_thb",l:"มูลค่าตลาด (฿)",t:"number",req:true},
+      {k:"purchase_price_thb",l:"ราคาที่ซื้อ (฿) — ไม่บังคับ",t:"number"},
+      {k:"mortgage_outstanding_thb",l:"จำนองคงเหลือ (฿)",t:"number"},
+      {k:"monthly_payment_thb",l:"ผ่อน/เดือน (฿)",t:"number"},
+      {k:"rental_income_monthly_thb",l:"ค่าเช่า/เดือน (฿)",t:"number"},
+      {k:"rental_expense_monthly_thb",l:"ค่าใช้จ่าย/เดือน (฿)",t:"number"},
+      {k:"counts_toward_passive",l:"นับค่าเช่าสุทธิเป็น passive income",t:"checkbox",full:true},
+      {k:"notes",l:"บันทึก",t:"textarea",full:true},
+    ]},
+  policy:{ title:"กรมธรรม์ประกัน", coll:"insurance.policies", idp:"ins",
+    fields:[
+      {k:"name",l:"ชื่อกรมธรรม์",t:"text",req:true},
+      {k:"policy_type",l:"ประเภท",t:"select",e:"policy_type"},
+      {k:"insurer",l:"บริษัท",t:"text"},
+      {k:"annual_premium_thb",l:"เบี้ย/ปี (฿)",t:"number"},
+      {k:"sum_insured_thb",l:"ทุนประกัน (฿)",t:"number"},
+      {k:"cash_value_thb",l:"มูลค่าเงินสด/เวนคืน (฿)",t:"number"},
+      {k:"maturity_date",l:"วันครบกำหนด",t:"date"},
+      {k:"beneficiary",l:"ผู้รับผลประโยชน์",t:"text"},
+      {k:"tax_deductible",l:"ใช้ลดหย่อนภาษีได้",t:"checkbox"},
+      {k:"counts_toward_networth",l:"นับมูลค่าเงินสดเป็น net worth",t:"checkbox"},
+      {k:"notes",l:"บันทึก",t:"textarea",full:true},
+    ]},
+};
+
+function openItemForm(type, existing){
+  const sch=FORM_SCHEMAS[type];
+  const it = existing || {};
+  const body = `<div class="form-grid">${sch.fields.map(f=>{
+    const val = it[f.k];
+    const full = f.full?` full`:"";
+    if(f.t==="checkbox"){
+      const checked = existing? (val!==false) : (f.k==="counts_toward_passive"||f.k==="counts_toward_networth");
+      return `<div class="field row-check${full}"><input type="checkbox" id="f_${f.k}" ${checked?"checked":""}/><label for="f_${f.k}">${f.l}</label></div>`;
+    }
+    let input;
+    if(f.t==="select"){
+      input=`<select id="f_${f.k}">${ENUMS[f.e].map(o=>`<option value="${o}" ${o===val?"selected":""}>${LABELS[f.e][o]}</option>`).join("")}</select>`;
+    } else if(f.t==="textarea"){
+      input=`<textarea id="f_${f.k}">${esc(val||"")}</textarea>`;
+    } else {
+      const tp = f.t==="number"?"number":(f.t==="date"?"date":"text");
+      const im = f.t==="number"?` inputmode="decimal"`:"";
+      input=`<input type="${tp}"${im} id="f_${f.k}" value="${val==null?"":esc(val)}"/>`;
+    }
+    return `<div class="field${full}"><label>${f.l}${f.req?` <span class="req">*</span>`:""}</label>${input}</div>`;
+  }).join("")}</div>`;
+
+  openModal((existing?"แก้ไข: ":"เพิ่ม: ")+sch.title, body, [
+    {label:"ยกเลิก", cls:"btn", on:closeModal},
+    {label:"บันทึก", cls:"btn primary", on:()=>saveItemForm(type, existing)},
+  ]);
+}
+
+function saveItemForm(type, existing){
+  const sch=FORM_SCHEMAS[type];
+  const obj = existing ? structuredCloneSafe(existing) : {id:uid(sch.idp), created_at:nowISO()};
+  for(const f of sch.fields){
+    const elx=document.getElementById("f_"+f.k); if(!elx) continue;
+    if(f.t==="checkbox") obj[f.k]=elx.checked;
+    else if(f.t==="number"){ const raw=elx.value.trim(); obj[f.k]= raw===""? (f.req?0:null) : Number(raw.replace(/,/g,"")); }
+    else { const raw=elx.value.trim(); obj[f.k]= raw===""?null:raw; }
+  }
+  // minimal inline validation
+  if(!obj.name || !obj.name.trim()){ alert("กรุณากรอกชื่อ"); return; }
+  const numErr = sch.fields.filter(f=>f.t==="number").some(f=> obj[f.k]!=null && (!Number.isFinite(obj[f.k])||obj[f.k]<0));
+  if(numErr){ alert("ตัวเลขต้องไม่ติดลบ และเป็นตัวเลขที่ถูกต้อง"); return; }
+  if(type==="holding" && obj.quality_score!=null && (obj.quality_score<0||obj.quality_score>12)){ alert("คะแนนคุณภาพต้องอยู่ 0–12"); return; }
+
+  const ns = structuredCloneSafe(STATE);
+  const [a,b]=sch.coll.split(".");
+  const arr = ns[a][b];
+  if(existing){ const idx=arr.findIndex(x=>x.id===existing.id); arr[idx]=obj; } else arr.push(obj);
+  closeModal();
+  commit(ns);
+}
+
+function deleteItem(type, id){
+  const sch=FORM_SCHEMAS[type];
+  const [a,b]=sch.coll.split(".");
+  const item = findById(STATE[a][b], id);
+  if(!confirm("ลบ \""+(item?item.name:"รายการนี้")+"\" ?")) return;
+  const ns=structuredCloneSafe(STATE);
+  ns[a][b]=ns[a][b].filter(x=>x.id!==id);
+  commit(ns);
+}
+
+// ---- modal + prompt + toast ----
+function openModal(title, bodyHTML, buttons){
+  $("#modal-title").textContent=title;
+  $("#modal-body").innerHTML=bodyHTML;
+  $("#modal-foot").innerHTML="";
+  (buttons||[]).forEach(b=>{ const el=document.createElement("button"); el.className=b.cls; el.textContent=b.label; el.onclick=b.on; $("#modal-foot").appendChild(el); });
+  $("#overlay").classList.add("open");
+}
+function closeModal(){ $("#overlay").classList.remove("open"); }
+function showPrompt(title, text){
+  const body=`<p class="muted" style="margin-top:0;font-size:13px">ก๊อปข้อความนี้ไปวางในแชต AI (เช่น Claude, ChatGPT)</p>
+    <textarea class="promptbox" id="prompt-text" readonly>${esc(text)}</textarea>`;
+  openModal(title, body, [
+    {label:"ปิด", cls:"btn", on:closeModal},
+    {label:"คัดลอก", cls:"btn primary", on:function(){ const ta=$("#prompt-text"); ta.select();
+        const done=()=>{ this.textContent="คัดลอกแล้ว ✓"; setTimeout(()=>{ this.textContent="คัดลอก"; },1500); };
+        const fail=()=>{ try{ if(document.execCommand("copy")){ done(); return; } }catch(e){}
+          this.textContent="เลือกแล้ว — กด Ctrl/Cmd+C"; };   // file:// อาจไม่มีสิทธิ์ clipboard → เลือกข้อความให้ก๊อปเอง
+        if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(ta.value).then(done).catch(fail); }
+        else fail(); }},
+  ]);
+}
+
+function wireGlobalEvents(){
+  $("#tabs").addEventListener("click",e=>{ const b=e.target.closest(".tab"); if(b) render(b.dataset.tab); });
+  $("#modal-x").onclick=closeModal;
+  $("#overlay").addEventListener("click",e=>{ if(e.target.id==="overlay") closeModal(); });
+  $("#btn-export").onclick=exportState;
+  $("#btn-import").onclick=()=>$("#file-import").click();
+  $("#file-import").addEventListener("change",e=>{
+    const f=e.target.files[0]; if(!f) return;
+    const rd=new FileReader();
+    rd.onload=()=>{ try{ if(!confirm("การนำเข้าจะแทนที่ข้อมูลทั้งหมดในเครื่องนี้ ดำเนินการต่อ?")) return;
+        importStateFromText(rd.result); alert("นำเข้าข้อมูลสำเร็จ ✓"); }
+      catch(err){ alert("นำเข้าไม่สำเร็จ:\n"+err.message); } finally{ e.target.value=""; } };
+    rd.readAsText(f);
+  });
+}
+
+/* ===================================================== SECTION 6 — SELF-TESTS */
+function runSelfTests(){
+  const R=[]; const eps=1e-6;
+  const ok=(name,cond)=>R.push({name,pass:!!cond});
+  const close=(name,got,want,tol)=>R.push({name,pass:Number.isFinite(got)&&Math.abs(got-want)<=(tol||eps),got,want});
+
+  // date helpers
+  ok("addMonths 2026-06 +90 = 2033-12", addMonths("2026-06",90)==="2033-12");
+  ok("addMonths 2026-12 +1 = 2027-01", addMonths("2026-12",1)==="2027-01");
+  ok("monthsBetween 2026-06..2040-12 = 174", monthsBetween("2026-06","2040-12")===174);
+  // clamp
+  ok("clampPct(150)=100", clampPct(150)===100);
+  ok("clampPct(-5)=0", clampPct(-5)===0);
+  ok("clampPct(NaN)=0", clampPct(NaN)===0);
+  // capital / nest egg
+  close("requiredCapital(100000,4)=30M", requiredCapital(100000,4), 30000000, 1);
+  ok("requiredCapital(0,4)=null", requiredCapital(0,4)===null);
+  ok("requiredCapital(100000,0)=null", requiredCapital(100000,0)===null);
+  close("nestEggFourPercent(100000)=30M", nestEggFourPercent(100000), 30000000, 1);
+  ok("nestEggFourPercent(0)=null", nestEggFourPercent(0)===null);
+  // portfolio totals
+  const pt = portfolioTotals([{value_thb:1000000,yield_pct:4,cost_basis_thb:800000}], 10);
+  close("portfolio grossAnnual=40000", pt.grossAnnualDividend, 40000, 1);
+  close("portfolio netAnnual=36000", pt.netAnnualDividend, 36000, 1);
+  close("portfolio netMonthly=3000", pt.netMonthlyDividend, 3000, 1);
+  close("portfolio blendedYield=4", pt.blendedYieldPct, 4, 1e-3);
+  close("portfolio netBlended=3.6", pt.netBlendedYieldPct, 3.6, 1e-3);
+  close("yieldOnCost=5", pt.yieldOnCostPct, 5, 1e-3);
+  const pt0=portfolioTotals([],10);
+  ok("empty portfolio yieldOnCost=null", pt0.yieldOnCostPct===null);
+  ok("empty portfolio netMonthly=0", pt0.netMonthlyDividend===0);
+  // required return — contribution aware (philosophy example ~5.3%)
+  const rr = requiredReturn(15000000, 1000000, 30000, 240);
+  close("requiredReturn(15M,1M,30k,240m) ~5.2%", rr*100, 5.2, 0.8);
+  ok("requiredReturn already-reached = 0", requiredReturn(1000000, 1000000, 0, 120)===0);
+  ok("requiredReturn target<=0 = null", requiredReturn(0,1000,0,120)===null);
+  ok("requiredReturn unreachable = Infinity", requiredReturn(1e15, 0, 1, 12)===Infinity);
+  // contributions REDUCE required return vs no-contribution
+  const rrNoC = requiredReturn(15000000, 1000000, 0, 240);
+  ok("contributions lower required return", rr < rrNoC);
+  // projection edge cases
+  const projFlat = projectToTarget({currentValue:100000,netBlendedYieldPct:0,expectedGrowthPct:0,monthlyContribution:0,targetCapital:1000000,startYear:2026,targetYear:2040});
+  ok("flat+0 contribution unreachable", projFlat.reachable===false);
+  const projNeg = projectToTarget({currentValue:100000,netBlendedYieldPct:0,expectedGrowthPct:-2,monthlyContribution:50000,targetCapital:1000000,startYear:2026,targetYear:2040});
+  ok("neg growth + contribution reachable", projNeg.reachable===true);
+  ok("projection target<=0 empty", projectToTarget({targetCapital:0,startYear:2026}).series.length===0);
+  const projHit = projectToTarget({currentValue:100,netBlendedYieldPct:0,expectedGrowthPct:0,monthlyContribution:100,targetCapital:1000,startYear:2026,targetYear:2027});
+  close("projectToTarget monthsToHit=9", projHit.monthsToHit, 9, 0);   // 100 + 100*9 = 1000
+  ok("projectToTarget hit reachable", projHit.reachable===true && projHit.hitYear===2027);
+  // net worth gross/debt consistency, incl. underwater property (mortgage > market value)
+  const nbState = defaultState();
+  nbState.investing.holdings.push({value_thb:500000});
+  nbState.real_estate.properties.push({market_value_thb:1000000,mortgage_outstanding_thb:1500000}); // underwater
+  nbState.insurance.policies.push({cash_value_thb:200000,counts_toward_networth:true});
+  const nb = netWorthBreakdown(nbState);
+  close("net worth gross−debt === total", nb.invest+nb.reGross+nb.insCash-nb.mortgage, nb.total, 1);
+  close("underwater equity negative", nb.reEquity, -500000, 1);
+  // allocation
+  const alloc = currentAllocation([{value_thb:60,stock_type:"compounder",asset_class:"stock"},{value_thb:40,stock_type:"dividend_grower",asset_class:"stock"}]);
+  close("allocation compounder=60%", alloc.pct.compounder, 60, 1e-6);
+  close("allocation dividend=40%", alloc.pct.dividend_grower, 40, 1e-6);
+  ok("bond → cash bucket", bucketOf({asset_class:"bond",stock_type:"none"})==="cash");
+  // target allocation bands + brake
+  ok("targetAllocationFor(5) conservative", targetAllocationFor(5).a.dividend_grower===30);
+  ok("targetAllocationFor(7) balanced", targetAllocationFor(7).a.compounder===30);
+  ok("targetAllocationFor(10) growth", targetAllocationFor(10).a.compounder===50);
+  ok("targetAllocationFor(15) brake", targetAllocationFor(15).brake===true);
+  ok("targetAllocationFor(Infinity) brake", targetAllocationFor(Infinity).brake===true);
+  // validate-before-commit: target=0 import rejected
+  const bad = validateState(Object.assign(defaultState(),{goal:Object.assign(defaultState().goal,{target_monthly_thb:0})}));
+  ok("validate rejects target=0", bad.ok===false);
+  const good = validateState(defaultState());
+  ok("validate accepts default", good.ok===true);
+  // round-trip: export→import preserves holdings
+  const s2 = defaultState(); s2.meta.onboarded=true;
+  s2.investing.holdings.push({id:"h1",name:"TEST",ticker:"T",asset_class:"stock",stock_type:"compounder",value_thb:5000,yield_pct:2,cost_basis_thb:null,quality_score:null,valuation_verdict:"unknown",market:"TH",notes:null,created_at:nowISO()});
+  const rt = validateState(migrateState(JSON.parse(JSON.stringify(s2))));
+  ok("round-trip valid", rt.ok===true);
+  ok("round-trip keeps holding", rt.value.investing.holdings.length===1 && rt.value.investing.holdings[0].name==="TEST");
+
+  return R;
+}
+function renderSelfTests(){
+  document.querySelector("header.topbar").style.display="none";
+  const R=runSelfTests();
+  const pass=R.filter(r=>r.pass).length, fail=R.length-pass;
+  const v=$("#view");
+  v.innerHTML = `<div id="selftest-view"><div class="card">
+    <h2 style="margin-bottom:10px">Self-tests — <span class="${fail?'test-fail':'test-pass'}">${pass}/${R.length} ผ่าน${fail?(' · '+fail+' FAIL'):''}</span></h2>
+    <table class="tbl"><thead><tr><th>#</th><th>เทสต์</th><th>ผล</th><th class="num">got</th><th class="num">want</th></tr></thead><tbody>
+    ${R.map((r,i)=>`<tr><td>${i+1}</td><td>${esc(r.name)}</td>
+      <td class="${r.pass?'test-pass':'test-fail'}">${r.pass?'PASS':'FAIL'}</td>
+      <td class="num">${r.got!=null?fmtNum(r.got,4):''}</td><td class="num">${r.want!=null?fmtNum(r.want,4):''}</td></tr>`).join("")}
+    </tbody></table>
+    <div style="margin-top:14px"><a href="?">← กลับสู่แอป</a></div>
+  </div></div>`;
+}
+
+/* ===================================================== BOOT */
+function boot(){
+  if(location.search.indexOf("selftest")>=0){ renderSelfTests(); return; }
+  const {state, fresh, corrupt} = loadState();
+  if(corrupt){
+    STATE = defaultState();   // don't wipe silently — show recovery banner over a default
+    renderTabs();
+    $("#view").innerHTML = `<div class="banner bad"><span class="bi">⚠️</span><div>
+      <b>ข้อมูลที่บันทึกไว้เสียหาย</b> อ่านไม่ได้ — เลือกได้: เริ่มใหม่ด้วยค่าเริ่มต้น หรือ นำเข้าไฟล์สำรอง<br>
+      <button class="btn sm" id="rec-default" style="margin-top:8px">เริ่มใหม่</button>
+      <button class="btn sm" id="rec-import" style="margin-top:8px">นำเข้าไฟล์</button></div></div>`;
+    $("#rec-default").onclick=()=>{ STATE.meta.onboarded=true; commit(STATE); };
+    $("#rec-import").onclick=()=>$("#file-import").click();
+    wireGlobalEvents();
+    return;
+  }
+  STATE = state;
+  if(fresh) persist();
+  wireGlobalEvents();
+  render("dashboard");
+}
+boot();
+</script>
+</body>
+</html>

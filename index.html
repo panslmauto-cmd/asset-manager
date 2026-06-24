@@ -859,8 +859,34 @@ function renderDashboard(v){
 
 // ---------- INVESTING ----------
 function renderInvesting(v){
-  const d = deriveInvesting(STATE, currentMonth());
   const g = STATE.goal, s = STATE.settings;
+  // The goal form is rendered ONCE per tab-render and is NOT touched while typing.
+  // Everything derived (results/holdings/allocation/prompts) lives in #inv-dynamic and is
+  // refreshed on each keystroke — so the input the user is editing never gets re-created
+  // (which would steal focus/caret, especially on number inputs).
+  v.innerHTML = `
+  <div class="card">
+    <div class="card-head"><h2>เป้าหมายเกษียณ <span class="sub">ปรับได้ทุกค่า</span></h2></div>
+    <div class="goalform">
+      ${gInput("target_monthly_thb","รายได้/เดือนที่ต้องการ (฿)",g.target_monthly_thb)}
+      ${gInput("target_year","ปีเป้าหมาย (ค.ศ.)",g.target_year)}
+      ${gSelectMethod(g.nestegg_method)}
+      ${gInput("starting_capital_thb","เงินตั้งต้น (฿)",g.starting_capital_thb,"ว่าง = ใช้มูลค่าพอร์ตปัจจุบัน")}
+      ${gInput("monthly_contribution_thb","เติมเดือนละ (฿)",g.monthly_contribution_thb)}
+      ${gInput("expected_growth_pct","คาดการเติบโตราคา (%/ปี)",g.expected_growth_pct)}
+      ${gInputS("wht_pct","ภาษีหัก ณ ที่จ่ายปันผล (%)",s.wht_pct)}
+    </div>
+  </div>
+  <div id="inv-dynamic">${renderInvestingDynamic()}</div>
+  <p class="disc">ไม่ใช่คำแนะนำการลงทุน — ตัวเลขประมาณการ</p>`;
+  wireGoalFormEvents();
+  wireInvDynamicEvents();
+}
+
+// Re-renderable region: depends on goal/settings/holdings. Rebuilt on every goal keystroke.
+function renderInvestingDynamic(){
+  const d = deriveInvesting(STATE, currentMonth());
+  const s = STATE.settings;
   const t = d.totals;
 
   // holdings table
@@ -900,20 +926,11 @@ function renderInvesting(v){
       </div>`;}).join("");
   }
 
-  v.innerHTML = `
-  <!-- goal + results -->
+  return `
+  <!-- results -->
   <div class="card">
-    <div class="card-head"><h2>เป้าหมายเกษียณ <span class="sub">ปรับได้ทุกค่า</span></h2></div>
-    <div class="goalform">
-      ${gInput("target_monthly_thb","รายได้/เดือนที่ต้องการ (฿)",g.target_monthly_thb)}
-      ${gInput("target_year","ปีเป้าหมาย (ค.ศ.)",g.target_year)}
-      ${gSelectMethod(g.nestegg_method)}
-      ${gInput("starting_capital_thb","เงินตั้งต้น (฿)",g.starting_capital_thb,"ว่าง = ใช้มูลค่าพอร์ตปัจจุบัน")}
-      ${gInput("monthly_contribution_thb","เติมเดือนละ (฿)",g.monthly_contribution_thb)}
-      ${gInput("expected_growth_pct","คาดการเติบโตราคา (%/ปี)",g.expected_growth_pct)}
-      ${gInputS("wht_pct","ภาษีหัก ณ ที่จ่ายปันผล (%)",s.wht_pct)}
-    </div>
-    <div id="inv-results">${renderInvestingResults(d)}</div>
+    <div class="card-head"><h2>ผลการคำนวณ <span class="sub">อัปเดตตามเป้าหมาย</span></h2></div>
+    ${renderInvestingResults(d)}
   </div>
 
   <!-- holdings -->
@@ -947,10 +964,12 @@ function renderInvesting(v){
       <button class="btn block" id="prompt-assess">🔎 ประเมินพอร์ต + อัปเดตข่าว</button>
       <button class="btn block" id="prompt-discover">🧭 หาหุ้นที่น่าสนใจ (ตามกรอบคะแนน)</button>
     </div>
-  </div>
-  <p class="disc">ไม่ใช่คำแนะนำการลงทุน — ตัวเลขประมาณการ</p>`;
+  </div>`;
+}
 
-  wireInvestingEvents();
+function refreshInvDynamic(){
+  const el = document.getElementById("inv-dynamic");
+  if(el){ el.innerHTML = renderInvestingDynamic(); wireInvDynamicEvents(); }
 }
 
 function renderInvestingResults(d){
@@ -1120,24 +1139,15 @@ function projectionSVG(series, target){
 function findById(arr,id){ return arr.find(x=>x.id===id); }
 function structuredCloneSafe(o){ return JSON.parse(JSON.stringify(o)); }
 
-// re-render whole investing tab but keep caret in the field the user is editing
-// (goal inputs affect results, allocation card AND portfolio totals — a partial re-render goes stale)
-function reRenderInvestingKeepFocus(){
-  const a=document.activeElement;
-  const gk=a&&a.dataset?a.dataset.goal:null, sk=a&&a.dataset?a.dataset.setting:null;
-  let pos=null; try{ pos=a&&typeof a.selectionStart==="number"?a.selectionStart:null; }catch(e){}
-  render("investing");
-  if(gk||sk){
-    const el=document.querySelector(gk?`[data-goal="${gk}"]`:`[data-setting="${sk}"]`);
-    if(el){ el.focus(); if(pos!=null){ try{ el.setSelectionRange(pos,pos); }catch(e){} } }
-  }
-}
-function wireInvestingEvents(){
+// goal-form inputs are NOT re-rendered while typing (re-creating a focused number input
+// resets its caret — the "jumps to front after 1 char" bug). On each keystroke we update
+// STATE and refresh ONLY #inv-dynamic; the form inputs stay in the DOM untouched.
+function wireGoalFormEvents(){
   const onInput=(obj,key,raw,isSelect)=>{
     if(isSelect){ obj[key]=raw; }
     else { const v = raw===""?0:Number(raw); if(!Number.isFinite(v)) return; obj[key]=v; } // never let NaN into STATE
     persistDebounced();
-    reRenderInvestingKeepFocus();
+    refreshInvDynamic();
   };
   document.querySelectorAll("[data-goal]").forEach(inp=>{
     const ev = inp.tagName==="SELECT" ? "change" : "input";
@@ -1146,11 +1156,14 @@ function wireInvestingEvents(){
   document.querySelectorAll("[data-setting]").forEach(inp=>{
     inp.addEventListener("input",()=> onInput(STATE.settings, inp.dataset.setting, inp.value, false));
   });
-  $("#add-holding").onclick=()=>openItemForm("holding",null);
+}
+// events inside the re-renderable #inv-dynamic region (holdings actions + prompt buttons)
+function wireInvDynamicEvents(){
+  const add=document.getElementById("add-holding"); if(add) add.onclick=()=>openItemForm("holding",null);
   document.querySelectorAll("[data-edit-h]").forEach(b=>b.onclick=()=>openItemForm("holding",findById(STATE.investing.holdings,b.dataset.editH)));
   document.querySelectorAll("[data-del-h]").forEach(b=>b.onclick=()=>deleteItem("holding",b.dataset.delH));
-  $("#prompt-assess").onclick=()=>showPrompt("ประเมินพอร์ต + อัปเดตข่าว", buildAssessPrompt(STATE,currentMonth()));
-  $("#prompt-discover").onclick=()=>showPrompt("หาหุ้นที่น่าสนใจ", buildDiscoverPrompt(STATE,currentMonth()));
+  const pa=document.getElementById("prompt-assess"); if(pa) pa.onclick=()=>showPrompt("ประเมินพอร์ต + อัปเดตข่าว", buildAssessPrompt(STATE,currentMonth()));
+  const pd=document.getElementById("prompt-discover"); if(pd) pd.onclick=()=>showPrompt("หาหุ้นที่น่าสนใจ", buildDiscoverPrompt(STATE,currentMonth()));
 }
 
 // ---- entity form schemas ----

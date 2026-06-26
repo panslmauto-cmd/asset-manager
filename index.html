@@ -242,7 +242,7 @@ footer.foot{text-align:center;color:var(--faint);font-size:12px;padding:24px var
 =================================================================================== */
 
 /* ===================================================== SECTION 0 — CONSTANTS */
-const SCHEMA_VERSION = 4;   // v4: holdings gain ai_summary (AI business summary) + understood (owner's competence gate)
+const SCHEMA_VERSION = 5;   // v5: top-level history[] — dated net-worth snapshots for the value-over-time chart
 const STORAGE_KEY = "assetManager.state";
 const BACKUP_KEY  = "assetManager.state.bak";
 
@@ -319,6 +319,7 @@ let _saveTimer = null;
 function uid(p){ return p + "_" + Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4); }
 function nowISO(){ return new Date().toISOString(); }
 function currentMonth(){ const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); }
+function todayStr(){ return new Date().toISOString().slice(0,10); }   // YYYY-MM-DD (for value snapshots)
 
 function defaultState(){
   return {
@@ -330,6 +331,7 @@ function defaultState(){
     investing:{ holdings:[] },
     real_estate:{ properties:[] },
     insurance:{ policies:[] },
+    history: [],
   };
 }
 
@@ -420,6 +422,8 @@ function migrateState(obj){
   // v3→v4: holdings gain ai_summary (AI business summary) + understood (owner's competence gate).
   // Additive — validateState fills defaults (null / false). No structural transform.
   if(v<4){ v=4; }
+  // v4→v5: add top-level history[] (dated net-worth snapshots). Additive — validateState defaults to [].
+  if(v<5){ v=5; }
   s.schemaVersion = SCHEMA_VERSION;
   return s;
 }
@@ -438,6 +442,7 @@ function validateState(obj){
     investing:{ holdings:[] },
     real_estate:{ properties:[] },
     insurance:{ policies:[] },
+    history: [],
   };
 
   // goal — the load-bearing numbers
@@ -539,6 +544,17 @@ function validateState(obj){
     });
     out.insurance.policies.push(o);
   });
+
+  // history — dated net-worth snapshots (drop malformed rows; never block load on history)
+  const inHist = Array.isArray(obj.history) ? obj.history : [];
+  inHist.forEach(s=>{
+    if(!s || typeof s!=="object" || typeof s.date!=="string") return;
+    const date = s.date.slice(0,10);                       // store the regex-validated sliced value
+    const netWorth = Number(s.netWorth), invest = Number(s.invest);
+    if(/^\d{4}-\d{2}-\d{2}$/.test(date) && isNum(netWorth))
+      out.history.push({date, netWorth, invest: isNum(invest)?invest:0});
+  });
+  if(out.history.length > 180) out.history = out.history.slice(out.history.length - 180);   // cap on load (matches addSnapshot write cap; guards corrupted/huge history)
 
   return { ok: errors.length===0, value: out, errors };
 }
@@ -719,6 +735,19 @@ function backupStatus(meta, hasData, nowIso){
   const ms = last ? (Date.parse(nowIso) - Date.parse(last)) : NaN;
   if(last==null || isNaN(ms)) return {never:true, days:null, stale: !!hasData};   // never, or corrupted timestamp → treat as never (safer: nudge)
   return {never:false, days: Math.max(0, Math.floor(ms/86400000)), stale: Math.floor(ms/86400000) >= 14};
+}
+// ---- value-over-time snapshots (pure) ----
+function snapshotOf(state, dateStr){
+  const nw = netWorthBreakdown(state);
+  return {date:dateStr, netWorth: Math.round(nw.total), invest: Math.round(nw.invest)};
+}
+// Append a snapshot, replacing any existing one for the same date (one point per day), sorted, capped.
+function addSnapshot(history, snap, cap){
+  const h = (history||[]).filter(s=>s.date!==snap.date);
+  h.push(snap);
+  h.sort((a,b)=> a.date<b.date?-1:(a.date>b.date?1:0));
+  const max = cap||180;
+  return h.length>max ? h.slice(h.length-max) : h;
 }
 
 // ---- derived bundle used by render + prompts (single computation point) ----
@@ -1206,6 +1235,19 @@ function renderDashboard(v){
     warns.unshift(`<div class="banner warn"><span class="bi">💾</span><div><b>สำรองข้อมูล</b> — ${msg}<br><button class="btn sm" id="backup-now" style="margin-top:8px">💾 สำรองตอนนี้</button></div></div>`);
   }
 
+  const hist = STATE.history || [];
+  let histInner;
+  if(hist.length>=2){
+    const a=hist[0].netWorth, b=hist[hist.length-1].netWorth, diff=b-a, pct=a?diff/a*100:0;
+    histInner = historyLineSVG(hist) + `<div class="legend"><span>${hist.length} จุด</span><span style="color:${diff>=0?'var(--green)':'var(--red)'}">${diff>=0?'▲':'▼'} ${fmtTHB(Math.abs(diff))} (${(diff>=0?'+':'')+pct.toFixed(1)}%) ตั้งแต่จุดแรก</span></div>`;
+  } else {
+    histInner = `<div class="muted" style="font-size:13px">ยังไม่มีประวัติพอวาดกราฟ — กด “บันทึกมูลค่าวันนี้” หรืออัปเดตราคาด้วย AI แล้วระบบจะเก็บจุดให้อัตโนมัติ</div>`;
+  }
+  const histCard = `<div class="card">
+    <div class="card-head"><h2>มูลค่าสุทธิตามเวลา <span class="sub">${hist.length>=2?(esc(hist[0].date)+" → "+esc(hist[hist.length-1].date)):"ติดตามการเติบโต"}</span></h2>
+      <button class="btn sm" id="snap-now">📸 บันทึกมูลค่าวันนี้</button></div>
+    ${histInner}</div>`;
+
   v.innerHTML = `
   <div class="grid cols-2">
     <div class="card stat hero">
@@ -1222,6 +1264,8 @@ function renderDashboard(v){
   </div>
 
   ${warns.length? `<div class="grid">${warns.join("")}</div>`:""}
+
+  ${histCard}
 
   <div class="grid cols-2">
     <div class="card">
@@ -1251,6 +1295,7 @@ function renderDashboard(v){
 
   v.querySelectorAll("[data-goto]").forEach(b=> b.onclick=()=>render(b.dataset.goto));
   const bn = v.querySelector("#backup-now"); if(bn) bn.onclick=exportState;
+  const sn = v.querySelector("#snap-now"); if(sn) sn.onclick=()=>{ const ns=structuredCloneSafe(STATE); ns.history=addSnapshot(ns.history, snapshotOf(ns, todayStr())); commit(ns); };
 }
 
 // ---------- INVESTING ----------
@@ -1545,6 +1590,23 @@ function projectionSVG(series, target){
     <text x="${W-padR}" y="${H-6}" text-anchor="end" font-size="11" fill="var(--muted)">${series[series.length-1].year+543}</text>
   </svg>`;
 }
+function historyLineSVG(snaps){
+  const W=640, H=150, padL=8, padR=8, padT=14, padB=22;
+  const vals = snaps.map(s=>s.netWorth);
+  const minV = vals.reduce((m,v)=>v<m?v:m, vals[0]), maxV = vals.reduce((m,v)=>v>m?v:m, vals[0]);
+  const range = maxV - minV, span = range>0 ? range : Math.max(1, maxV);
+  const lo = minV - span*0.1, hi = maxV + span*0.1;
+  const x = i => padL + (W-padL-padR) * (i/(snaps.length-1||1));
+  const y = v => padT + (H-padT-padB) * (1 - (v-lo)/((hi-lo)||1));
+  const pts = snaps.map((s,i)=>x(i)+","+y(s.netWorth)).join(" ");
+  const area = `${padL},${y(lo)} ${pts} ${x(snaps.length-1)},${y(lo)}`;
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="display:block">
+    <polygon points="${area}" fill="var(--brand-soft)" opacity="0.5"/>
+    <polyline points="${pts}" fill="none" stroke="var(--brand)" stroke-width="2.5"/>
+    <text x="${padL}" y="${H-6}" font-size="11" fill="var(--muted)">${esc(snaps[0].date)}</text>
+    <text x="${W-padR}" y="${H-6}" text-anchor="end" font-size="11" fill="var(--muted)">${esc(snaps[snaps.length-1].date)}</text>
+  </svg>`;
+}
 
 /* ===================================================== SECTION 5 — EVENTS */
 function findById(arr,id){ return arr.find(x=>x.id===id); }
@@ -1786,6 +1848,7 @@ function renderPricePreview(){
 function commitPriceUpdate(prices){
   const {state:ns, applied}=applyPrices(STATE, prices);
   ns.meta=ns.meta||{}; ns.meta.lastPriceUpdate=nowISO();
+  ns.history = addSnapshot(ns.history, snapshotOf(ns, todayStr()));   // record value-over-time point
   closeModal();
   commit(ns);
   alert("อัปเดตราคา "+applied+" รายการแล้ว ✓");
@@ -2058,7 +2121,7 @@ function runSelfTests(){
     real_estate:{properties:[]}, insurance:{policies:[]}};
   const mig = validateState(migrateState(JSON.parse(JSON.stringify(v1))));
   ok("v1→v3 migrates ok", mig.ok===true);
-  ok("v1→v4 schemaVersion=4", mig.value.schemaVersion===4);
+  ok("v1→v5 schemaVersion=5", mig.value.schemaVersion===5);
   close("v1 lump value preserved", mig.value.investing.holdings[0].value_thb, 9000, 1);
   ok("v1 holding units=null", mig.value.investing.holdings[0].units===null);
 
@@ -2131,7 +2194,7 @@ function runSelfTests(){
     investing:{holdings:[{id:"u",name:"TH",asset_class:"stock",stock_type:"compounder",units:100,price_per_unit:50,cost_per_unit:40,yield_pct:3}]},
     real_estate:{properties:[]}, insurance:{policies:[]}};
   const m3 = validateState(migrateState(JSON.parse(JSON.stringify(v2h))));
-  ok("v2→v4 migrates ok", m3.ok===true && m3.value.schemaVersion===4);
+  ok("v2→v5 migrates ok", m3.ok===true && m3.value.schemaVersion===5);
   close("v2→v3 value unchanged 5000", m3.value.investing.holdings[0].value_thb, 5000, 1e-6);
   ok("v2→v3 currency default THB", m3.value.investing.holdings[0].currency==="THB");
   ok("v2→v3 fx default 1", m3.value.investing.holdings[0].fx_rate===1);
@@ -2194,7 +2257,7 @@ function runSelfTests(){
   // v3→v4 migration: ai_summary/understood defaults, value preserved
   const v3h={schemaVersion:3, meta:{onboarded:true}, goal:defaultState().goal, settings:defaultState().settings, investing:{holdings:[{id:"u",name:"Z",asset_class:"stock",stock_type:"none",units:10,price_per_unit:5,fx_rate:1,currency:"THB",yield_pct:2}]}, real_estate:{properties:[]}, insurance:{policies:[]}};
   const m4=validateState(migrateState(JSON.parse(JSON.stringify(v3h))));
-  ok("v3→v4 migrates ok (schemaVersion=4)", m4.ok===true && m4.value.schemaVersion===4);
+  ok("v3→v5 migrates ok (schemaVersion=5)", m4.ok===true && m4.value.schemaVersion===5);
   ok("v4 ai_summary default null", m4.value.investing.holdings[0].ai_summary===null);
   ok("v4 understood default false", m4.value.investing.holdings[0].understood===false);
   close("v3→v4 value preserved 10×5×1=50", m4.value.investing.holdings[0].value_thb, 50, 1e-6);
@@ -2233,6 +2296,22 @@ function runSelfTests(){
   ok("import prompt embeds pasted text", buildImportPrompt("MY BROKER DATA").indexOf("MY BROKER DATA")>=0);
   ok("import cost=0 → no price placeholder", parseImportHoldings('[{"name":"FREE","units":10,"cost_per_unit":0}]').holdings[0].price_per_unit===null);
   ok("validate defaults missing yield to 0", (()=>{const s=defaultState();s.investing.holdings=[{name:"NY",units:1,price_per_unit:1,fx_rate:1,currency:"THB"}];const r=validateState(s);return r.ok===true && r.value.investing.holdings[0].yield_pct===0;})());
+
+  // ---- value-over-time snapshots ----
+  const snSt = defaultState(); snSt.investing.holdings=[computeHoldingDerived({id:"a",name:"A",units:100,price_per_unit:10,fx_rate:1,currency:"THB",yield_pct:0,asset_class:"stock",stock_type:"none"})];
+  const snap = snapshotOf(snSt, "2026-06-26");
+  close("snapshot netWorth = 1000", snap.netWorth, 1000, 0);
+  ok("snapshot has date", snap.date==="2026-06-26");
+  let H = addSnapshot([], {date:"2026-06-01",netWorth:100,invest:100});
+  H = addSnapshot(H, {date:"2026-06-02",netWorth:120,invest:120});
+  ok("addSnapshot appends sorted", H.length===2 && H[0].date==="2026-06-01" && H[1].netWorth===120);
+  H = addSnapshot(H, {date:"2026-06-02",netWorth:130,invest:130});   // same day → replace
+  ok("addSnapshot replaces same day", H.length===2 && H[1].netWorth===130);
+  ok("addSnapshot caps length", addSnapshot(Array.from({length:200},(_,i)=>({date:"2026-01-"+String((i%28)+1).padStart(2,"0")+i,netWorth:i,invest:i})), {date:"2030-01-01",netWorth:1,invest:1}, 180).length<=180);
+  // history survives validate; malformed rows dropped
+  const hv = validateState((()=>{const s=defaultState();s.history=[{date:"2026-06-01",netWorth:500,invest:400},{date:"bad",netWorth:1},{netWorth:9}];return s;})());
+  ok("history keeps valid + drops malformed", hv.ok===true && hv.value.history.length===1 && hv.value.history[0].netWorth===500);
+  ok("validate caps history at 180 on load", validateState((()=>{const s=defaultState();s.history=Array.from({length:300},(_,i)=>({date:"2026-"+String((i%12)+1).padStart(2,"0")+"-"+String((i%28)+1).padStart(2,"0"),netWorth:i,invest:i}));return s;})()).value.history.length<=180);
 
   return R;
 }

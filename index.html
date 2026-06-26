@@ -172,6 +172,12 @@ textarea{min-height:80px;resize:vertical}
 .sum-gate .t{font-size:13px;line-height:1.5}
 .ai-howto-card{cursor:pointer;border:1px dashed var(--brand);background:var(--brand-soft)}
 .ai-howto-card:hover{border-style:solid}
+.gloss-item{padding:9px 0;border-bottom:1px dashed var(--border);font-size:13.5px;line-height:1.55}
+.gloss-item:last-of-type{border-bottom:none}
+.gloss-item b{display:block;margin-bottom:2px}
+.linkbtn{background:none;border:none;color:var(--brand);font-size:13px;font-weight:600;cursor:pointer;padding:0;text-decoration:underline}
+.linkbtn:hover{opacity:.75}
+.linkbtn:focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:2px}
 
 /* misc */
 .muted{color:var(--muted)}
@@ -1237,6 +1243,28 @@ function helpBadge(key){ return `<button class="help" data-help="${esc(key)}" ti
 function openHelpModal(key){ const h=HELP[key]; if(!h) return;
   openModal(h.t, `<div style="font-size:14px;line-height:1.75">${esc(h.b)}</div>`, [{label:"เข้าใจแล้ว",cls:"btn primary",on:closeModal}]); }
 
+// Glossary of terms a beginner will meet in AI replies (the app's own metrics have "?" badges already).
+const GLOSSARY = [
+  ["ปันผล (Dividend)", "ส่วนแบ่งกำไรที่บริษัทจ่ายคืนผู้ถือหุ้น มักจ่ายปีละ 1–2 ครั้ง"],
+  ["Yield (ผลตอบแทนปันผล)", "เงินปันผลต่อปี ÷ ราคาหุ้น คิดเป็น % — ยิ่งสูงยิ่งได้กระแสเงินเยอะเทียบราคา (แต่สูงผิดปกติอาจเป็นสัญญาณเสี่ยง)"],
+  ["P/E (ราคาต่อกำไร)", "ราคาหุ้น ÷ กำไรต่อหุ้น — บอกว่าจ่ายกี่เท่าของกำไร 1 ปี ยิ่งสูง = ตลาดคาดหวังโตมาก หรืออาจแพง (ระวัง: บริษัทขาดทุน P/E จะติดลบหรือไม่มีความหมาย)"],
+  ["ROE (ผลตอบแทนผู้ถือหุ้น)", "กำไร ÷ ส่วนของผู้ถือหุ้น คิดเป็น % — ใช้เงินทุนทำกำไรเก่งแค่ไหน ยิ่งสูงยิ่งดี (ถ้าไม่ได้กู้เยอะ)"],
+  ["ROIC (ผลตอบแทนต่อเงินลงทุน)", "กำไรจากการดำเนินงาน ÷ เงินทุนที่ใช้จริง (ทุน + หนี้) — วัดว่าธุรกิจทำกำไรจากทุกบาทที่ลงทุนได้ดีแค่ไหน ต่างจาก ROE ที่บิดให้สูงได้ด้วยการกู้เยอะ"],
+  ["Market cap (มูลค่าตลาด)", "ราคาหุ้น × จำนวนหุ้นทั้งหมด = ขนาดบริษัท (ใหญ่/กลาง/เล็ก)"],
+  ["D/E (หนี้ต่อทุน)", "หนี้สิน ÷ ส่วนของผู้ถือหุ้น — ยิ่งสูงยิ่งมีหนี้มาก เสี่ยงเวลาดอกเบี้ยขึ้น/ธุรกิจสะดุด"],
+  ["Valuation (ระดับราคา)", "การประเมินว่าราคาตอนนี้ แพง / เหมาะสม / ถูก เทียบกับมูลค่าที่ควรเป็น"],
+  ["Drift (ส่วนต่างสัดส่วน)", "ความต่างระหว่างสัดส่วนพอร์ตปัจจุบันกับสัดส่วนเป้าหมาย ที่ควรค่อยๆ ปรับเข้าหากัน"],
+  ["Compounder / Growth", "หุ้นโตเร็ว เน้นกำไรทบต้น มักไม่จ่ายปันผลมาก"],
+  ["Dividend Grower", "หุ้นที่ปันผลเพิ่มสม่ำเสมอทุกปี — สมดุลโตกับปันผล"],
+  ["High-Yield", "หุ้น/REIT ปันผลสูง เน้นกระแสเงินสด (เช่น กองอสังหาฯ)"],
+  ["Defensive (ตั้งรับ)", "หุ้นทนวิกฤต ธุรกิจจำเป็น (ไฟฟ้า/อาหาร/ของใช้) ราคาผันผวนน้อย"],
+  ["Sequence-of-returns risk", "ความเสี่ยงเจอตลาดตกแรงตอนใกล้/เพิ่งเกษียณ ทำให้เงินก้อนหายไวกว่าที่คิด — เลยต้องลดเสี่ยงเมื่อใกล้เป้า"],
+];
+function openGlossaryModal(){
+  const rows = GLOSSARY.map(([t,b])=>`<div class="gloss-item"><b>${esc(t)}</b><div class="muted">${esc(b)}</div></div>`).join("");
+  openModal("📖 ศัพท์ที่ AI อาจใช้", `<p class="muted" style="margin-top:0;font-size:13px">เจอคำพวกนี้ในคำตอบ AI? ดูความหมายสั้นๆ ที่นี่ (ศัพท์ในแอปมีปุ่ม “?” อธิบายอยู่แล้ว)</p>${rows}<p class="disc">${esc(DISCLAIMER_TH)}</p>`, [{label:"ปิด",cls:"btn primary",on:closeModal}]);
+}
+
 function renderTabs(){
   $("#tabs").innerHTML = TABS.map(t=>
     `<button class="tab" role="tab" data-tab="${t.id}" aria-selected="${t.id===ACTIVE_TAB}">
@@ -1496,6 +1524,7 @@ function renderInvestingDynamic(){
       <button class="btn block" id="prompt-assess">🔎 ประเมินพอร์ต + อัปเดตข่าว</button>
       <button class="btn block" id="prompt-discover">🧭 หาหุ้นที่น่าสนใจ (ตามกรอบคะแนน)</button>
     </div>
+    <p style="margin:12px 0 0;text-align:center"><button class="linkbtn" id="open-glossary">📖 ไม่เข้าใจศัพท์ในคำตอบ AI? เปิดอภิธานศัพท์</button></p>
   </div>`;
 }
 
@@ -1713,8 +1742,13 @@ function wireInvDynamicEvents(){
   document.querySelectorAll("[data-edit-h]").forEach(b=>b.onclick=()=>openItemForm("holding",findById(STATE.investing.holdings,b.dataset.editH)));
   document.querySelectorAll("[data-info-h]").forEach(b=>b.onclick=()=>openSummaryModal(b.dataset.infoH));
   document.querySelectorAll("[data-del-h]").forEach(b=>b.onclick=()=>deleteItem("holding",b.dataset.delH));
-  const pa=document.getElementById("prompt-assess"); if(pa) pa.onclick=()=>showPrompt("ประเมินพอร์ต + อัปเดตข่าว", buildAssessPrompt(STATE,currentMonth()));
+  const pa=document.getElementById("prompt-assess"); if(pa) pa.onclick=()=>{
+    if(STATE.investing.holdings.length===0){ openModal("ประเมินพอร์ต + อัปเดตข่าว",
+      `<div class="banner info"><span class="bi">💡</span><div>ยังไม่มีหุ้นในพอร์ต — การประเมินต้องมีรายการก่อน<br>กด <b>“ดูตัวอย่าง”</b> เพื่อลองด้วยพอร์ตตัวอย่าง หรือ <b>“+ เพิ่มรายการ”</b> ใส่หุ้นของคุณก่อน</div></div>`,
+      [{label:"ปิด",cls:"btn primary",on:closeModal}]); return; }
+    showPrompt("ประเมินพอร์ต + อัปเดตข่าว", buildAssessPrompt(STATE,currentMonth())); };
   const pd=document.getElementById("prompt-discover"); if(pd) pd.onclick=()=>showPrompt("หาหุ้นที่น่าสนใจ", buildDiscoverPrompt(STATE,currentMonth()));
+  const gl=document.getElementById("open-glossary"); if(gl) gl.onclick=openGlossaryModal;
   const pp=document.getElementById("prompt-price"); if(pp) pp.onclick=openPriceUpdateModal;
   const pe=document.getElementById("prompt-enrich"); if(pe) pe.onclick=openEnrichModal;
   const hw=document.getElementById("ai-howto"); if(hw){ hw.onclick=openAiHowtoModal; hw.onkeydown=(e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); openAiHowtoModal(); } }; }
@@ -2310,6 +2344,10 @@ function runSelfTests(){
   ok("assess prompt: 3 ranked problems", assessP.indexOf("เรียงตามความสำคัญ")>=0);
   ok("discover prompt: verify-yourself caveat", discoverP.indexOf("ไม่มีอยู่จริง")>=0 && discoverP.indexOf("ตรวจสอบราคา")>=0);
   ok("discover prompt: confidence ask", discoverP.indexOf("ระดับความมั่นใจ")>=0);
+  // ---- P2 glossary (terms AI replies use) ----
+  ok("glossary has many terms", GLOSSARY.length>=12);
+  ok("glossary covers P/E + ROE + market cap", GLOSSARY.some(g=>/P\/E/.test(g[0])) && GLOSSARY.some(g=>/ROE/.test(g[0])) && GLOSSARY.some(g=>/Market cap/i.test(g[0])));
+  ok("glossary rows are [term,desc] pairs", GLOSSARY.every(g=>g.length===2 && g[0] && g[1]));
 
   // ---- meta.lastPriceUpdate survives validate (additive, no schema bump) ----
   const metaSt = defaultState(); metaSt.meta.lastPriceUpdate="2026-06-26T00:00:00.000Z";

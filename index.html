@@ -240,7 +240,7 @@ footer.foot{text-align:center;color:var(--faint);font-size:12px;padding:24px var
 =================================================================================== */
 
 /* ===================================================== SECTION 0 — CONSTANTS */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;   // v2: holdings recorded as units × price_per_unit (+ cost_per_unit)
 const STORAGE_KEY = "assetManager.state";
 const BACKUP_KEY  = "assetManager.state.bak";
 
@@ -389,7 +389,9 @@ function migrateState(obj){
   let v = Number(obj.schemaVersion||0);
   if(v > SCHEMA_VERSION) throw new Error("ไฟล์นี้สร้างจากแอปเวอร์ชันใหม่กว่า กรุณาอัปเดตแอป");
   let s = obj;
-  // (future migrations: if(v<2){...; v=2;})
+  // v1→v2: holdings gain units/price_per_unit/cost_per_unit (nullable). Old lump holdings keep
+  // their value_thb/cost_basis_thb and work unchanged — normalized as null fields in validateState.
+  if(v<2){ v=2; }
   s.schemaVersion = SCHEMA_VERSION;
   return s;
 }
@@ -435,7 +437,11 @@ function validateState(obj){
       id: h.id||uid("h"), name:String(h.name||"").trim(), ticker:h.ticker?String(h.ticker):null,
       asset_class: ENUMS.asset_class.includes(h.asset_class)?h.asset_class:"stock",
       stock_type: ENUMS.stock_type.includes(h.stock_type)?h.stock_type:"none",
-      value_thb: Number(h.value_thb), yield_pct: Number(h.yield_pct),
+      units: (h.units==null||h.units==="")?null:Number(h.units),                       // v2
+      price_per_unit: (h.price_per_unit==null||h.price_per_unit==="")?null:Number(h.price_per_unit),  // v2
+      cost_per_unit: (h.cost_per_unit==null||h.cost_per_unit==="")?null:Number(h.cost_per_unit),      // v2
+      value_thb: (h.value_thb==null||h.value_thb==="")?0:Number(h.value_thb),
+      yield_pct: Number(h.yield_pct),
       cost_basis_thb: (h.cost_basis_thb==null||h.cost_basis_thb==="")?null:Number(h.cost_basis_thb),
       quality_score: (h.quality_score==null||h.quality_score==="")?null:Number(h.quality_score),
       valuation_verdict: ENUMS.valuation_verdict.includes(h.valuation_verdict)?h.valuation_verdict:"unknown",
@@ -443,6 +449,10 @@ function validateState(obj){
       notes: h.notes?String(h.notes):null, created_at: h.created_at||nowISO(),
     };
     if(!o.name) errors.push("holding #"+(i+1)+" ไม่มีชื่อ");
+    if(o.units!=null && !(isNum(o.units)&&o.units>=0)) errors.push("holding "+(o.name||i+1)+": จำนวนหน่วยไม่ถูกต้อง");
+    if(o.price_per_unit!=null && !(isNum(o.price_per_unit)&&o.price_per_unit>=0)) errors.push("holding "+(o.name||i+1)+": ราคา/หน่วยไม่ถูกต้อง");
+    if(o.cost_per_unit!=null && !(isNum(o.cost_per_unit)&&o.cost_per_unit>=0)) errors.push("holding "+(o.name||i+1)+": ต้นทุน/หน่วยไม่ถูกต้อง");
+    computeHoldingDerived(o);   // value_thb / cost_basis_thb = units × price/cost when present (else keep legacy lump)
     if(!(isNum(o.value_thb)&&o.value_thb>=0)) errors.push("holding "+(o.name||i+1)+": มูลค่าไม่ถูกต้อง");
     if(!(isNum(o.yield_pct)&&o.yield_pct>=0)) errors.push("holding "+(o.name||i+1)+": yield ไม่ถูกต้อง");
     if(o.cost_basis_thb!=null && !(isNum(o.cost_basis_thb)&&o.cost_basis_thb>=0)) errors.push("holding "+o.name+": cost ไม่ถูกต้อง");
@@ -518,6 +528,17 @@ function monthsBetween(a, b){
 }
 
 // ---- per-holding & portfolio ----
+// v2: value_thb / cost_basis_thb are DERIVED from units × price when those are present.
+// Legacy (v1) holdings have units=null → keep their stored lump value_thb / cost_basis_thb.
+// value_thb stays the canonical field every downstream calc reads (blast radius = 0).
+function computeHoldingDerived(h){
+  // units semantics: null = legacy lump (keep stored value_thb) · >0 = compute from market data
+  // · 0 = zero position (no override). Empty form fields save as null (not 0) to preserve the sentinel.
+  if(h.units>0 && h.price_per_unit>0) h.value_thb = h.units * h.price_per_unit;
+  if(!Number.isFinite(h.value_thb)) h.value_thb = 0;
+  if(h.units>0 && h.cost_per_unit>0) h.cost_basis_thb = h.units * h.cost_per_unit;
+  return h;
+}
 function holdingGrossAnnual(h){ return nn(h.value_thb) * nn(h.yield_pct) / 100; }
 function holdingNetMonthly(h, wht){ return holdingGrossAnnual(h) * (1 - clampPct(wht)/100) / 12; }
 function holdingYieldOnCost(h){
@@ -700,7 +721,8 @@ function buildAssessPrompt(state, nowMonth){
   L.push("== พอร์ตปัจจุบัน (รวม "+fmtTHB(d.totals.totalValue)+", net yield "+d.totals.netBlendedYieldPct.toFixed(2)+"%) ==");
   if(state.investing.holdings.length===0){ L.push("(ยังไม่มีรายการ)"); }
   else state.investing.holdings.forEach(h=>{
-    L.push("- "+h.name+(h.ticker?" ("+h.ticker+")":"")+" · ประเภท: "+LABELS.stock_type[h.stock_type]+" · มูลค่า "+fmtTHB(h.value_thb)
+    const unitTxt = (h.units>0 && h.price_per_unit>0) ? " ("+fmtNum(h.units, h.units%1?4:0)+" หน่วย @ "+fmtTHB(h.price_per_unit)+")" : "";
+    L.push("- "+h.name+(h.ticker?" ("+h.ticker+")":"")+" · ประเภท: "+LABELS.stock_type[h.stock_type]+" · มูลค่า "+fmtTHB(h.value_thb)+unitTxt
       +" · yield "+n0(h.yield_pct)+"%"+(h.quality_score!=null?" · คะแนนคุณภาพ "+h.quality_score+"/12":"")
       +(h.valuation_verdict&&h.valuation_verdict!=="unknown"?" · ราคา:"+LABELS.valuation_verdict[h.valuation_verdict]:"")+" · ตลาด:"+LABELS.market[h.market]);
   });
@@ -895,13 +917,17 @@ function renderInvestingDynamic(){
     holdRows = `<div class="empty"><div class="big">📈</div>ยังไม่มีหุ้น/สินทรัพย์ลงทุน — กด “+ เพิ่มรายการ”</div>`;
   } else {
     holdRows = `<table class="tbl responsive"><thead><tr>
-      <th>ชื่อ</th><th>ประเภท</th><th class="num">มูลค่า</th><th class="num">yield</th>
+      <th>ชื่อ</th><th>ประเภท</th><th class="num">หน่วย × ราคา</th><th class="num">มูลค่า</th><th class="num">yield</th>
       <th class="num">ปันผลสุทธิ/เดือน</th><th class="num">YoC</th><th>ราคา</th><th></th></tr></thead><tbody>
       ${STATE.investing.holdings.map(h=>{
         const yoc=holdingYieldOnCost(h);
+        const unitCell = (h.units>0 && h.price_per_unit>0)
+          ? `${fmtNum(h.units, h.units%1?4:0)} × ${fmtTHB(h.price_per_unit)}`
+          : `<small class="muted">ก้อน</small>`;
         return `<tr>
           <td data-label="ชื่อ"><b>${esc(h.name)}</b>${h.ticker?` <small class="muted">${esc(h.ticker)}</small>`:""}</td>
           <td data-label="ประเภท"><span class="type-dot" style="background:${BUCKET_COLOR[bucketOf(h)]}"></span>${esc(LABELS.stock_type[h.stock_type])}</td>
+          <td class="num" data-label="หน่วย × ราคา">${unitCell}</td>
           <td class="num" data-label="มูลค่า">${fmtTHB(h.value_thb)}</td>
           <td class="num" data-label="yield">${fmtPct(h.yield_pct)}</td>
           <td class="num" data-label="ปันผลสุทธิ/เดือน">${fmtTHB(holdingNetMonthly(h,s.wht_pct))}</td>
@@ -1174,9 +1200,10 @@ const FORM_SCHEMAS = {
       {k:"ticker",l:"Ticker",t:"text"},
       {k:"asset_class",l:"ประเภทสินทรัพย์",t:"select",e:"asset_class"},
       {k:"stock_type",l:"ประเภทตามกรอบ",t:"select",e:"stock_type"},
-      {k:"value_thb",l:"มูลค่าปัจจุบัน (฿)",t:"number",req:true},
+      {k:"units",l:"จำนวนหน่วย/หุ้น",t:"number",uiRequired:true,hint:"มูลค่า = จำนวน × ราคา/หน่วย"},
+      {k:"price_per_unit",l:"ราคาตลาด/หน่วย (฿)",t:"number",uiRequired:true},
+      {k:"cost_per_unit",l:"ต้นทุน/หน่วย (฿) — ไม่บังคับ",t:"number"},
       {k:"yield_pct",l:"เงินปันผล/ผลตอบแทน (%)",t:"number"},
-      {k:"cost_basis_thb",l:"ต้นทุน (฿) — ไม่บังคับ",t:"number"},
       {k:"quality_score",l:"คะแนนคุณภาพ 0–12 — ไม่บังคับ",t:"number"},
       {k:"valuation_verdict",l:"ระดับราคา",t:"select",e:"valuation_verdict"},
       {k:"market",l:"ตลาด",t:"select",e:"market"},
@@ -1231,7 +1258,7 @@ function openItemForm(type, existing){
       const im = f.t==="number"?` inputmode="decimal"`:"";
       input=`<input type="${tp}"${im} id="f_${f.k}" value="${val==null?"":esc(val)}"/>`;
     }
-    return `<div class="field${full}"><label>${f.l}${f.req?` <span class="req">*</span>`:""}</label>${input}</div>`;
+    return `<div class="field${full}"><label>${f.l}${(f.req||f.uiRequired)?` <span class="req">*</span>`:""}</label>${input}${f.hint?`<span class="hint">${f.hint}</span>`:""}</div>`;
   }).join("")}</div>`;
 
   openModal((existing?"แก้ไข: ":"เพิ่ม: ")+sch.title, body, [
@@ -1254,6 +1281,7 @@ function saveItemForm(type, existing){
   const numErr = sch.fields.filter(f=>f.t==="number").some(f=> obj[f.k]!=null && (!Number.isFinite(obj[f.k])||obj[f.k]<0));
   if(numErr){ alert("ตัวเลขต้องไม่ติดลบ และเป็นตัวเลขที่ถูกต้อง"); return; }
   if(type==="holding" && obj.quality_score!=null && (obj.quality_score<0||obj.quality_score>12)){ alert("คะแนนคุณภาพต้องอยู่ 0–12"); return; }
+  if(type==="holding") computeHoldingDerived(obj);   // value_thb / cost_basis_thb = units × price/cost
 
   const ns = structuredCloneSafe(STATE);
   const [a,b]=sch.coll.split(".");
@@ -1391,6 +1419,29 @@ function runSelfTests(){
   const rt = validateState(migrateState(JSON.parse(JSON.stringify(s2))));
   ok("round-trip valid", rt.ok===true);
   ok("round-trip keeps holding", rt.value.investing.holdings.length===1 && rt.value.investing.holdings[0].name==="TEST");
+  // v2: units × price → value, units × cost_per_unit → cost basis
+  const hd = computeHoldingDerived({units:100, price_per_unit:50, cost_per_unit:40});
+  close("derived value = 100×50 = 5000", hd.value_thb, 5000, 1e-6);
+  close("derived cost = 100×40 = 4000", hd.cost_basis_thb, 4000, 1e-6);
+  const hd2 = computeHoldingDerived({units:null, price_per_unit:null, value_thb:7777}); // legacy lump kept
+  close("legacy lump value preserved", hd2.value_thb, 7777, 1e-6);
+  const hd0 = computeHoldingDerived({units:0, price_per_unit:50, value_thb:8888}); // zero position → no override
+  close("units=0 keeps existing value", hd0.value_thb, 8888, 1e-6);
+  const hd3 = computeHoldingDerived({units:10.5, price_per_unit:12}); // fractional units (funds)
+  close("fractional units value = 126", hd3.value_thb, 126, 1e-6);
+  // portfolioTotals reads derived value_thb (blast radius 0)
+  const ptU = portfolioTotals([computeHoldingDerived({units:200, price_per_unit:25, cost_per_unit:20, yield_pct:4})], 0);
+  close("unit-based portfolio totalValue=5000", ptU.totalValue, 5000, 1);
+  close("unit-based yieldOnCost=5", ptU.yieldOnCostPct, 5, 1e-3); // (5000×4%)/4000=5%
+  // migration v1 (lump, no units) → v2 loads, value preserved, units null
+  const v1 = {schemaVersion:1, meta:{onboarded:true}, goal:defaultState().goal, settings:defaultState().settings,
+    investing:{holdings:[{id:"x",name:"OLD",asset_class:"stock",stock_type:"defensive",value_thb:9000,yield_pct:3}]},
+    real_estate:{properties:[]}, insurance:{policies:[]}};
+  const mig = validateState(migrateState(JSON.parse(JSON.stringify(v1))));
+  ok("v1→v2 migrates ok", mig.ok===true);
+  ok("v1→v2 schemaVersion=2", mig.value.schemaVersion===2);
+  close("v1 lump value preserved", mig.value.investing.holdings[0].value_thb, 9000, 1);
+  ok("v1 holding units=null", mig.value.investing.holdings[0].units===null);
 
   return R;
 }

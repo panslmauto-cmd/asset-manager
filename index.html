@@ -364,6 +364,8 @@ function commit(next){
 }
 
 function exportState(){
+  STATE.meta.lastBackup = nowISO();   // record backup time so the data-safety nudge can reset
+  persist();
   const data = JSON.stringify(STATE, null, 2);
   const blob = new Blob([data], {type:"application/json"});
   const url = URL.createObjectURL(blob);
@@ -371,6 +373,7 @@ function exportState(){
   a.href = url; a.download = "asset-manager-backup-" + currentMonth() + "-" + new Date().getDate() + ".json";
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  render(ACTIVE_TAB);   // refresh the backup nudge
 }
 
 function importStateFromText(rawText){
@@ -693,6 +696,13 @@ function passiveMonthly(state){
   let rent=0;
   state.real_estate.properties.forEach(p=>{ if(p.counts_toward_passive) rent += n0(p.rental_income_monthly_thb)-n0(p.rental_expense_monthly_thb); });
   return { dividend:div, rent, total:div+rent };
+}
+// Data-safety: local-only state → nudge to export. stale = never-backed-up-with-data, or >14 days old.
+function backupStatus(meta, hasData, nowIso){
+  const last = (meta && meta.lastBackup) ? meta.lastBackup : null;
+  const ms = last ? (Date.parse(nowIso) - Date.parse(last)) : NaN;
+  if(last==null || isNaN(ms)) return {never:true, days:null, stale: !!hasData};   // never, or corrupted timestamp → treat as never (safer: nudge)
+  return {never:false, days: Math.max(0, Math.floor(ms/86400000)), stale: Math.floor(ms/86400000) >= 14};
 }
 
 // ---- derived bundle used by render + prompts (single computation point) ----
@@ -1114,6 +1124,14 @@ function renderDashboard(v){
   if(d.target && d.target.brake && !d.needsInput) warns.push(`<div class="banner bad"><span class="bi">⚠️</span><div><b>ผลตอบแทนที่ต้องการสูงเกินไป</b><br>${esc(BRAKE_MSG)}</div></div>`);
   if(d.glide && d.glide.active) warns.push(`<div class="banner info"><span class="bi">🛬</span><div><b>เข้าสู่ช่วง glide path</b><br>${esc(d.glide.message)}</div></div>`);
   if(d.conc && d.conc.flagged) warns.push(`<div class="banner warn"><span class="bi">🎯</span><div><b>พอร์ตกระจุกตัว</b> — ${esc(d.conc.topName)} คิดเป็น ${d.conc.topSharePct.toFixed(0)}% ของพอร์ตลงทุน</div></div>`);
+  const hasData = STATE.investing.holdings.length || STATE.real_estate.properties.length || STATE.insurance.policies.length;
+  const bk = backupStatus(STATE.meta, hasData, nowISO());
+  if(bk.stale){
+    const msg = bk.never
+      ? "ยังไม่เคยสำรองข้อมูล — ทุกอย่างเก็บใน<b>เครื่องนี้เท่านั้น</b> ถ้าล้างเบราว์เซอร์/เปลี่ยนเครื่องจะหายหมด"
+      : "สำรองล่าสุด "+bk.days+" วันก่อน — แนะนำสำรองสม่ำเสมอ (ข้อมูลอยู่ในเครื่องนี้เท่านั้น)";
+    warns.unshift(`<div class="banner warn"><span class="bi">💾</span><div><b>สำรองข้อมูล</b> — ${msg}<br><button class="btn sm" id="backup-now" style="margin-top:8px">💾 สำรองตอนนี้</button></div></div>`);
+  }
 
   v.innerHTML = `
   <div class="grid cols-2">
@@ -1159,6 +1177,7 @@ function renderDashboard(v){
   <p class="disc">ตัวเลขประมาณการ ไม่ใช่คำแนะนำการลงทุน</p>`;
 
   v.querySelectorAll("[data-goto]").forEach(b=> b.onclick=()=>render(b.dataset.goto));
+  const bn = v.querySelector("#backup-now"); if(bn) bn.onclick=exportState;
 }
 
 // ---------- INVESTING ----------
@@ -2050,6 +2069,15 @@ function runSelfTests(){
   // ---- jargon help ----
   ok("help badge has data-help", helpBadge("nest_egg").indexOf('data-help="nest_egg"')>=0);
   ok("HELP covers core terms", ["required_return","nest_egg","net_yield","yoc","buckets","quality_score"].every(k=>HELP[k]&&HELP[k].t&&HELP[k].b));
+
+  // ---- backup data-safety nudge ----
+  ok("backup never+data → stale", backupStatus({}, true, "2026-06-26T00:00:00Z").never===true && backupStatus({}, true, "2026-06-26T00:00:00Z").stale===true);
+  ok("backup never+no data → not stale", backupStatus({}, false, "2026-06-26T00:00:00Z").stale===false);
+  ok("backup 20 days → stale", backupStatus({lastBackup:"2026-06-06T00:00:00Z"}, true, "2026-06-26T00:00:00Z").stale===true);
+  ok("backup 3 days → not stale", backupStatus({lastBackup:"2026-06-23T00:00:00Z"}, true, "2026-06-26T00:00:00Z").stale===false);
+  close("backup days count = 20", backupStatus({lastBackup:"2026-06-06T00:00:00Z"}, true, "2026-06-26T00:00:00Z").days, 20, 0);
+  ok("meta.lastBackup survives validate", validateState((()=>{const s=defaultState();s.meta.lastBackup="2026-06-01T00:00:00.000Z";return s;})()).value.meta.lastBackup==="2026-06-01T00:00:00.000Z");
+  ok("backup corrupted date → treated as never", backupStatus({lastBackup:"garbage"}, true, "2026-06-26T00:00:00Z").never===true);
 
   return R;
 }

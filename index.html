@@ -302,6 +302,7 @@ const TARGET_ALLOCATION = [
   {max:8,  name:"สมดุล",                a:{compounder:30,dividend_grower:30,high_yield:15,defensive:15,cash:10}},
   {max:12, name:"เอียง growth",         a:{compounder:50,dividend_grower:25,high_yield:10,defensive:10,cash:5}},
 ];
+const GLIDE_ENDPOINT = TARGET_ALLOCATION[0].a;   // glide destination = most-conservative band (sorted asc by max → [0])
 const BRAKE_MSG = "ผลตอบแทนที่ต้องการสูงเกินไป — อย่าไล่ผลตอบแทนด้วยการเพิ่มความเสี่ยง ให้ปรับ input แทน: ออมเพิ่ม / ยืดเวลา / ลดเป้ารายได้";
 
 // Scoring framework text embedded into AI-prompt #2 (from wiki/stock-scoring-sheet.md)
@@ -724,9 +725,21 @@ function allocationDrift(currentPct, targetA){
 }
 function glidePathStatus(goal, settings, nowYear){
   const yearsLeft = goal.target_year - nowYear;
-  const active = yearsLeft>=0 && yearsLeft <= n0(settings.glide_years);
+  const active = yearsLeft>=0 && yearsLeft < n0(settings.glide_years);   // strict <: aligns with glidedTarget (banner shows only when the % numbers actually move)
   return { yearsLeft, active,
-    message: active ? "ใกล้เป้าหมาย ("+yearsLeft+" ปี) — ค่อยๆ ย้ายน้ำหนักจาก Growth → Dividend + Defensive เพื่อลด sequence-of-returns risk" : null };
+    message: active ? "ใกล้เป้าหมาย ("+yearsLeft+" ปี) — กรอบเป้าหมายถูกปรับให้อนุรักษ์ขึ้นอัตโนมัติตามเวลา (ค่อยๆ เพิ่ม Dividend + Defensive ลด Growth) เพื่อลด sequence-of-returns risk" : null };
+}
+// Real glide path: blend the required-return target toward GLIDE_ENDPOINT as the goal nears.
+// t=0 outside the window (yearsLeft >= glideYears) → reqTarget unchanged; t→1 at the target year → conservative endpoint.
+// Braking (reqTarget=null) → null (nothing to blend; BRAKE wins). Each band sums to 100, so the convex blend does too.
+function glidedTarget(reqTarget, yearsLeft, glideYears){
+  if(!reqTarget) return null;
+  if(!(glideYears>0) || !(yearsLeft < glideYears)) return {a:reqTarget, t:0};
+  const t = Math.min(1, Math.max(0, (glideYears - yearsLeft)/glideYears));   // clamp 0..1 — yearsLeft<0 (past goal) saturates to 1 (full conservative)
+  const a={}; let sum=0;
+  BUCKETS.forEach(b=>{ a[b]=Math.round((1-t)*(reqTarget[b]||0) + t*(GLIDE_ENDPOINT[b]||0)); sum+=a[b]; });
+  if(sum!==100){ let big=BUCKETS[0]; BUCKETS.forEach(b=>{ if(a[b]>a[big]) big=b; }); a[big]+=100-sum; }  // fix rounding residual on largest bucket
+  return {a, t};
 }
 
 // ---- whole-portfolio aggregates (state-level) ----
@@ -776,14 +789,17 @@ function deriveInvesting(state, nowMonth){
   const months = monthsBetween(nowMonth, g.target_year+"-12");
   const rr = (nest!=null) ? requiredReturn(nest, base, g.monthly_contribution_thb, months) : null;
   const rrPct = (rr==null)?null:(rr===Infinity?Infinity:rr*100);
-  const target = (rrPct==null)?{brake:false,a:null,name:"—"}:targetAllocationFor(rrPct);
+  const baseTarget = (rrPct==null)?{brake:false,a:null,name:"—"}:targetAllocationFor(rrPct);
+  const glide = glidePathStatus(g, s, Number(nowMonth.split("-")[0]));
+  // real glide: when inside the window with a base allocation, blend the % numbers toward the conservative endpoint
+  const gres = baseTarget.a ? glidedTarget(baseTarget.a, glide.yearsLeft, n0(s.glide_years)) : null;
+  const target = (gres && gres.t>0) ? Object.assign({}, baseTarget, {a:gres.a, glided:true, glideT:gres.t}) : baseTarget;
   const curAlloc = currentAllocation(state.investing.holdings);
   const drift = target.a ? allocationDrift(curAlloc.pct, target.a) : null;
   const proj = (nest!=null) ? projectToTarget({
     currentValue:base, netBlendedYieldPct:totals.netBlendedYieldPct, expectedGrowthPct:g.expected_growth_pct,
     monthlyContribution:g.monthly_contribution_thb, targetCapital:nest,
     startYear:Number(nowMonth.split("-")[0]), targetYear:g.target_year }) : {series:[],reachable:false,hitYear:null};
-  const glide = glidePathStatus(g, s, Number(nowMonth.split("-")[0]));
   const conc = concentration(state.investing.holdings, s.concentration_threshold_pct);
   // needsInput: no starting capital AND no contribution yet → target is unreachable for a trivial reason,
   // not because the goal is too aggressive. Distinguish so we show a friendly hint, not a BRAKE warning.
@@ -1421,7 +1437,7 @@ function renderInvestingDynamic(){
 
   <!-- allocation vs framework -->
   <div class="card">
-    <div class="card-head"><h2>สัดส่วนพอร์ต vs กรอบเป้าหมาย${helpBadge("buckets")} <span class="sub">${(!d.needsInput&&d.target&&d.target.a)?esc(d.target.name):"—"}</span></h2></div>
+    <div class="card-head"><h2>สัดส่วนพอร์ต vs กรอบเป้าหมาย${helpBadge("buckets")} <span class="sub">${(!d.needsInput&&d.target&&d.target.a)?esc(d.target.name+(d.target.glided?" · กำลัง glide "+Math.round(d.target.glideT*100)+"%":"")):"—"}</span></h2></div>
     ${d.needsInput
       ? `<div class="banner info"><span class="bi">💡</span><div>กรอก <b>เงินตั้งต้น</b> หรือ <b>เงินเติมรายเดือน</b> (และเพิ่มหุ้นในพอร์ต) เพื่อคำนวณผลตอบแทนที่ต้องการและสัดส่วนพอร์ตเป้าหมาย</div></div>`
       : (d.target&&d.target.brake
@@ -2124,6 +2140,20 @@ function runSelfTests(){
   ok("targetAllocationFor(10) growth", targetAllocationFor(10).a.compounder===50);
   ok("targetAllocationFor(15) brake", targetAllocationFor(15).brake===true);
   ok("targetAllocationFor(Infinity) brake", targetAllocationFor(Infinity).brake===true);
+  // ---- glide path: time-based de-risk of the target % ----
+  const gReq = targetAllocationFor(10).a;   // growth band (50/25/10/10/5)
+  ok("glidedTarget outside window → unchanged", glidedTarget(gReq, 8, 6).t===0 && glidedTarget(gReq, 8, 6).a===gReq);
+  ok("glidedTarget at target year → endpoint", (()=>{ const r=glidedTarget(gReq,0,6); return r.t===1 && r.a.compounder===GLIDE_ENDPOINT.compounder && r.a.defensive===GLIDE_ENDPOINT.defensive; })());
+  ok("glidedTarget endpoint sums 100", (()=>{ const a=glidedTarget(gReq,0,6).a; return BUCKETS.reduce((s,b)=>s+a[b],0)===100; })());
+  ok("glidedTarget midpoint sums 100", (()=>{ const a=glidedTarget(gReq,3,6).a; return BUCKETS.reduce((s,b)=>s+a[b],0)===100; })());
+  ok("glidedTarget midpoint less growth than base", glidedTarget(gReq,3,6).a.compounder < gReq.compounder);
+  ok("glidedTarget monotonic: nearer = more defensive", glidedTarget(gReq,1,6).a.defensive >= glidedTarget(gReq,5,6).a.defensive);
+  ok("glidedTarget braking (null) → null", glidedTarget(null, 2, 6)===null);
+  ok("glidedTarget glideYears=0 → unchanged", glidedTarget(gReq, 0, 0).t===0);
+  ok("glidedTarget past goal (yearsLeft<0) → endpoint", glidedTarget(gReq,-2,6).t===1);
+  // banner window aligns with the numbers moving: inactive at exactly glide_years, active just inside
+  ok("glide banner off at boundary (==glide_years)", glidePathStatus({target_year:2032},{glide_years:6},2026).active===false);
+  ok("glide banner on inside window (<glide_years)", glidePathStatus({target_year:2031},{glide_years:6},2026).active===true);
   // validate-before-commit: target=0 import rejected
   const bad = validateState(Object.assign(defaultState(),{goal:Object.assign(defaultState().goal,{target_monthly_thb:0})}));
   ok("validate rejects target=0", bad.ok===false);

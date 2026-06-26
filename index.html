@@ -171,6 +171,8 @@ textarea{min-height:80px;resize:vertical}
 .kv .k{color:var(--muted)}
 .kv .v{font-weight:700;font-variant-numeric:tabular-nums}
 .promptbox{width:100%;min-height:150px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.help{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;border:1px solid var(--border);background:var(--surface);color:var(--muted);font-size:11px;line-height:1;cursor:pointer;padding:0;vertical-align:middle;margin-left:4px}
+.help:hover{color:var(--brand);border-color:var(--brand)}
 footer.foot{text-align:center;color:var(--faint);font-size:12px;padding:24px var(--space) 40px;line-height:1.6}
 .disc{font-size:11.5px;color:var(--faint);margin-top:10px;font-style:italic}
 
@@ -1046,6 +1048,19 @@ function fmtDateTH(iso){ try{ return new Date(iso).toLocaleDateString("th-TH",{d
 function fmtNative(n,ccy){ if(n==null||!Number.isFinite(n)) return "—"; if(!ccy||ccy==="THB") return fmtTHB(n); return fmtNum(n, n%1?2:0)+" "+esc(ccy); }   // esc: ccy is user/AI-sourced, goes to innerHTML
 function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c])); }
 
+// ---------- jargon help (beginner-friendly explanations) ----------
+const HELP = {
+  required_return:{t:"ผลตอบแทนที่ต้องการ", b:"ผลตอบแทนต่อปีที่พอร์ตต้องทำให้ได้ (รวมเงินที่เติมทุกเดือนแล้ว) เพื่อถึงก้อนเป้าหมายภายในปีที่ตั้งไว้ ถ้าตัวเลขนี้สูงเกินไป = อย่าไล่ผลตอบแทนด้วยการเพิ่มความเสี่ยง ให้ปรับ input แทน: ออมเพิ่ม / ยืดเวลา / ลดเป้ารายได้"},
+  nest_egg:{t:"ก้อนเป้าหมาย (nest egg)", b:"เงินก้อนที่ต้องมีตอนเกษียณ เพื่อให้ถอน/ปันผลได้ตามรายได้ต่อเดือนที่ต้องการ คำนวณได้ 2 วิธี: กฎ 4% (รายได้ต่อปี ×25) หรือ 'อยู่ด้วยปันผล' (รายได้ต่อปี ÷ yield สุทธิของพอร์ต)"},
+  net_yield:{t:"Net yield เฉลี่ย", b:"อัตราปันผลเฉลี่ยทั้งพอร์ต หลังหักภาษีหัก ณ ที่จ่ายปันผล = ปันผลสุทธิต่อปี ÷ มูลค่าพอร์ตปัจจุบัน"},
+  yoc:{t:"Yield on Cost (YoC)", b:"ปันผลต่อปี ÷ 'ต้นทุน' ที่ซื้อมา (ไม่ใช่ราคาปัจจุบัน) บอกว่าเงินที่ลงทุนไปตอนแรกสร้างปันผลกี่ % ต่อปี ยิ่งถือนานและกิจการเพิ่มปันผล ตัวเลขนี้ยิ่งสูง"},
+  buckets:{t:"กรอบสัดส่วนพอร์ต 4 กลุ่ม", b:"แบ่งหุ้นตามบทบาท: Compounder/Growth (โตเร็ว) · Dividend Grower (ปันผลโตสม่ำเสมอ) · High-Yield (ปันผลสูง เช่น REIT) · Defensive (ตั้งรับ ทนวิกฤต) + เงินสด. แอปจะแนะนำสัดส่วนเป้าหมายตาม 'ผลตอบแทนที่ต้องการ' — ยิ่งต้องการสูง ยิ่งเอียงไป Growth"},
+  quality_score:{t:"คะแนนคุณภาพการเงิน", b:"คะแนน 0–12 ที่ AI ประเมินจากงบการเงิน (กระแสเงินสด หนี้ มาร์จิน ROE/ROIC ฯลฯ) ยิ่งสูงยิ่งคุณภาพดี. ส่วนด่าน 'คุณเข้าใจธุรกิจนี้ไหม' เป็นการตัดสินของคุณเอง AI ไม่ให้คะแนนแทน"},
+};
+function helpBadge(key){ return `<button class="help" data-help="${key}" title="คำอธิบาย" aria-label="คำอธิบาย">?</button>`; }
+function openHelpModal(key){ const h=HELP[key]; if(!h) return;
+  openModal(h.t, `<div style="font-size:14px;line-height:1.75">${esc(h.b)}</div>`, [{label:"เข้าใจแล้ว",cls:"btn primary",on:closeModal}]); }
+
 function renderTabs(){
   $("#tabs").innerHTML = TABS.map(t=>
     `<button class="tab" role="tab" data-tab="${t.id}" aria-selected="${t.id===ACTIVE_TAB}">
@@ -1234,15 +1249,15 @@ function renderInvestingDynamic(){
     <div class="grid cols-4" style="margin-bottom:14px">
       <div class="stat"><div class="label">มูลค่ารวม</div><div class="value sm">${fmtTHB(t.totalValue)}</div></div>
       <div class="stat"><div class="label">ปันผลสุทธิ/เดือน</div><div class="value sm">${fmtTHB(t.netMonthlyDividend)}</div></div>
-      <div class="stat"><div class="label">Net yield เฉลี่ย</div><div class="value sm">${fmtPct(t.netBlendedYieldPct,2)}</div></div>
-      <div class="stat"><div class="label">Yield on cost</div><div class="value sm">${t.yieldOnCostPct==null?"—":fmtPct(t.yieldOnCostPct,2)}</div></div>
+      <div class="stat"><div class="label">Net yield เฉลี่ย${helpBadge("net_yield")}</div><div class="value sm">${fmtPct(t.netBlendedYieldPct,2)}</div></div>
+      <div class="stat"><div class="label">Yield on cost${helpBadge("yoc")}</div><div class="value sm">${t.yieldOnCostPct==null?"—":fmtPct(t.yieldOnCostPct,2)}</div></div>
     </div>
     ${holdRows}
   </div>
 
   <!-- allocation vs framework -->
   <div class="card">
-    <div class="card-head"><h2>สัดส่วนพอร์ต vs กรอบเป้าหมาย <span class="sub">${(!d.needsInput&&d.target&&d.target.a)?esc(d.target.name):"—"}</span></h2></div>
+    <div class="card-head"><h2>สัดส่วนพอร์ต vs กรอบเป้าหมาย${helpBadge("buckets")} <span class="sub">${(!d.needsInput&&d.target&&d.target.a)?esc(d.target.name):"—"}</span></h2></div>
     ${d.needsInput
       ? `<div class="banner info"><span class="bi">💡</span><div>กรอก <b>เงินตั้งต้น</b> หรือ <b>เงินเติมรายเดือน</b> (และเพิ่มหุ้นในพอร์ต) เพื่อคำนวณผลตอบแทนที่ต้องการและสัดส่วนพอร์ตเป้าหมาย</div></div>`
       : (d.target&&d.target.brake
@@ -1283,8 +1298,8 @@ function renderInvestingResults(d){
               (d.nest==null?"—":"<span style='color:var(--amber)'>ยังไม่ถึงตามสมมติฐาน</span>"));
   return `
     <div class="grid cols-4" style="margin-top:6px">
-      <div class="stat"><div class="label">ก้อนเป้าหมาย</div><div class="value sm">${fmtTHB(d.nest)}</div><div class="hint">${d.nest!=null?LABELS.nestegg_method[STATE.goal.nestegg_method]:"ตั้งค่ายังไม่พอ"}</div></div>
-      <div class="stat"><div class="label">ผลตอบแทนที่ต้องการ</div><div class="value sm">${rrTxt}<small class="muted" style="font-size:12px">/ปี</small></div><div class="hint">${rrHint}</div></div>
+      <div class="stat"><div class="label">ก้อนเป้าหมาย${helpBadge("nest_egg")}</div><div class="value sm">${fmtTHB(d.nest)}</div><div class="hint">${d.nest!=null?LABELS.nestegg_method[STATE.goal.nestegg_method]:"ตั้งค่ายังไม่พอ"}</div></div>
+      <div class="stat"><div class="label">ผลตอบแทนที่ต้องการ${helpBadge("required_return")}</div><div class="value sm">${rrTxt}<small class="muted" style="font-size:12px">/ปี</small></div><div class="hint">${rrHint}</div></div>
       <div class="stat"><div class="label">คาดถึงเป้าหมาย</div><div class="value sm" style="font-size:15px">${hit}</div></div>
       <div class="stat"><div class="label">เหลือเวลา</div><div class="value sm">${Math.max(0,Math.round(d.months/12))} ปี</div><div class="hint">${d.months} เดือน</div></div>
     </div>
@@ -1749,7 +1764,7 @@ function openSummaryModal(id){
   const chips = [
     `<span class="chip">${esc(LABELS.asset_class[h.asset_class]||h.asset_class)}</span>`,
     h.stock_type&&h.stock_type!=="none"?`<span class="chip">${esc(BUCKET_LABEL[bucketOf(h)]||"")}</span>`:"",
-    h.quality_score!=null?`<span class="chip ${h.quality_score>=10?'good':(h.quality_score>=7?'warn':'bad')}">คุณภาพการเงิน ${h.quality_score}/12</span>`:"",
+    h.quality_score!=null?`<span class="chip ${h.quality_score>=10?'good':(h.quality_score>=7?'warn':'bad')}">คุณภาพการเงิน ${fmtNum(h.quality_score,0)}/12</span>`+helpBadge("quality_score"):"",
     (h.valuation_verdict&&h.valuation_verdict!=="unknown")?`<span class="chip">ราคา: ${esc(LABELS.valuation_verdict[h.valuation_verdict])}</span>`:"",
     h.yield_pct>0?`<span class="chip">yield ${fmtPct(h.yield_pct)}</span>`:"",
     h.value_thb>0?`<span class="chip">มูลค่า ${fmtTHB(h.value_thb)}</span>`:"",
@@ -1777,6 +1792,7 @@ function openSummaryModal(id){
 
 function wireGlobalEvents(){
   $("#tabs").addEventListener("click",e=>{ const b=e.target.closest(".tab"); if(b) render(b.dataset.tab); });
+  document.body.addEventListener("click",e=>{ const b=e.target.closest("[data-help]"); if(b) openHelpModal(b.dataset.help); });   // jargon "?" badges (delegated → works on re-rendered content)
   $("#modal-x").onclick=closeModal;
   $("#overlay").addEventListener("click",e=>{ if(e.target.id==="overlay") closeModal(); });
   $("#btn-export").onclick=exportState;
@@ -2030,6 +2046,10 @@ function runSelfTests(){
   ok("v4 ai_summary default null", m4.value.investing.holdings[0].ai_summary===null);
   ok("v4 understood default false", m4.value.investing.holdings[0].understood===false);
   close("v3→v4 value preserved 10×5×1=50", m4.value.investing.holdings[0].value_thb, 50, 1e-6);
+
+  // ---- jargon help ----
+  ok("help badge has data-help", helpBadge("nest_egg").indexOf('data-help="nest_egg"')>=0);
+  ok("HELP covers core terms", ["required_return","nest_egg","net_yield","yoc","buckets","quality_score"].every(k=>HELP[k]&&HELP[k].t&&HELP[k].b));
 
   return R;
 }

@@ -333,6 +333,22 @@ function defaultState(){
   };
 }
 
+// Illustrative demo portfolio (generic, no personal data) so a new user can explore before entering real data.
+function sampleState(){
+  const s = defaultState();
+  s.meta.onboarded = true;
+  s.goal.monthly_contribution_thb = 20000;
+  s.investing.holdings = [
+    {name:"ตัวอย่าง: หุ้นปันผลไทย", ticker:"DIV", asset_class:"stock", stock_type:"dividend_grower", units:1000, currency:"THB", fx_rate:1, price_per_unit:52, cost_per_unit:45, yield_pct:4, quality_score:9, valuation_verdict:"fair", market:"TH", ai_summary:"ตัวอย่างข้อมูล — ลบทิ้งแล้วใส่ของจริงได้เลย\nธุรกิจ: บริษัทตัวอย่างที่จ่ายปันผลสม่ำเสมอ\nหาเงิน: ขายสินค้า/บริการหลัก"},
+    {name:"ตัวอย่าง: หุ้นเติบโต US", ticker:"GROW", asset_class:"stock", stock_type:"compounder", units:10, currency:"USD", fx_rate:35, price_per_unit:210, cost_per_unit:150, yield_pct:0.5, quality_score:11, valuation_verdict:"fair", market:"US"},
+    {name:"ตัวอย่าง: REIT ปันผลสูง", ticker:"REIT", asset_class:"reit", stock_type:"high_yield", units:2000, currency:"THB", fx_rate:1, price_per_unit:12, cost_per_unit:11, yield_pct:7, quality_score:8, valuation_verdict:"cheap", market:"TH"},
+  ];
+  s.real_estate.properties = [
+    {name:"ตัวอย่าง: คอนโดปล่อยเช่า", property_type:"condo", market_value_thb:3000000, mortgage_outstanding_thb:1500000, monthly_payment_thb:14000, rental_income_monthly_thb:15000, rental_expense_monthly_thb:4000, counts_toward_passive:true},
+  ];
+  return s;
+}
+
 function loadState(){
   let raw;
   try{ raw = localStorage.getItem(STORAGE_KEY); }catch(e){ raw=null; }
@@ -455,7 +471,7 @@ function validateState(obj){
       price_per_unit: (h.price_per_unit==null||h.price_per_unit==="")?null:Number(h.price_per_unit),  // v2/v3 native
       cost_per_unit: (h.cost_per_unit==null||h.cost_per_unit==="")?null:Number(h.cost_per_unit),      // v2/v3 native
       value_thb: (h.value_thb==null||h.value_thb==="")?0:Number(h.value_thb),
-      yield_pct: Number(h.yield_pct),
+      yield_pct: (h.yield_pct==null||h.yield_pct==="")?0:Number(h.yield_pct),   // default 0 (don't NaN-reject a holding missing yield)
       cost_basis_thb: (h.cost_basis_thb==null||h.cost_basis_thb==="")?null:Number(h.cost_basis_thb),
       quality_score: (h.quality_score==null||h.quality_score==="")?null:Number(h.quality_score),
       valuation_verdict: ENUMS.valuation_verdict.includes(h.valuation_verdict)?h.valuation_verdict:"unknown",
@@ -917,6 +933,46 @@ function applyEnrich(state, items){
   return {state:ns, applied};
 }
 
+// ---- AI import round-trip (bulk add holdings from a pasted broker statement) ----
+// Parse AI-extracted holdings into new-holding shells. Price defaults to cost (placeholder until price-update).
+function parseImportHoldings(text){
+  const {arr, error}=extractJsonArray(text);
+  if(error) return {holdings:[], errors:[error]};
+  const errors=[], holdings=[];
+  arr.forEach((e,i)=>{
+    if(!e||typeof e!=="object"){ errors.push("รายการ #"+(i+1)+" ไม่ถูกต้อง"); return; }
+    const name=String(e.name||"").trim();
+    if(!name){ errors.push("รายการ #"+(i+1)+" ไม่มีชื่อ"); return; }
+    const units=pickNum(e.units, e.qty, e.quantity, e.shares);
+    const cost=pickNum(e.cost_per_unit, e.cost, e.avg_cost, e.cost_price);
+    const price=pickNum(e.price_per_unit, e.price, e.market_price);
+    const ccy=(e.currency||e.ccy)?String(e.currency||e.ccy).trim().toUpperCase().slice(0,6):"THB";
+    const fx=pickNum(e.fx_rate, e.fx);
+    const market=ENUMS.market.includes(e.market)?e.market:(ccy==="THB"?"TH":(ccy==="USD"?"US":"other"));
+    holdings.push({
+      name, ticker: e.ticker?String(e.ticker).trim().toUpperCase().slice(0,20):null,
+      units:(units!=null&&units>=0)?units:null,
+      cost_per_unit:(cost!=null&&cost>=0)?cost:null,
+      price_per_unit:(price!=null&&price>0)?price:((cost!=null&&cost>0)?cost:null),   // placeholder = cost (only if >0) until price-update
+      currency:ccy, fx_rate:(fx!=null&&fx>0)?fx:1,
+      market, asset_class:"stock", stock_type:"none", yield_pct:0, valuation_verdict:"unknown",
+    });
+  });
+  return {holdings, errors};
+}
+// Append imported holdings into a CLONED state (never overwrites existing). Derives value_thb.
+function applyImport(state, holdings){
+  const ns=JSON.parse(JSON.stringify(state));
+  let added=0;
+  holdings.forEach(h=>{
+    // defaults first, then h overwrites (caller's parsed fields win); fresh id so it's always a new row
+    const o=Object.assign({id:uid("h"), created_at:nowISO(), ai_summary:null, understood:false, notes:null, quality_score:null, cost_basis_thb:null}, h, {id:uid("h")});
+    computeHoldingDerived(o);
+    ns.investing.holdings.push(o); added++;
+  });
+  return {state:ns, added};
+}
+
 /* ===================================================== SECTION 3 — PROMPTS (string builders, no API) */
 function buildAssessPrompt(state, nowMonth){
   const d = deriveInvesting(state, nowMonth);
@@ -1048,6 +1104,21 @@ function buildEnrichPrompt(holdings){
   return L.join("\n");
 }
 
+// Import prompt: wraps the user's pasted broker text and asks AI to extract holdings as JSON.
+function buildImportPrompt(rawText){
+  const L=[];
+  L.push("ฉันมีรายการการลงทุนจากโบรกเกอร์/แอปด้านล่าง ช่วยแยกเป็นรายการๆ แล้วตอบกลับเป็น JSON array อย่างเดียว");
+  L.push("");
+  L.push("แต่ละรายการมีฟิลด์: name (ชื่อ) · ticker · units (จำนวนหน่วย/หุ้น) · cost_per_unit (ต้นทุนต่อหน่วย) · currency (สกุล เช่น THB/USD) · market (TH/US/other)");
+  L.push("ถ้าข้อมูลไหนไม่มี ให้ใส่ null — อย่าเดามั่ว");
+  L.push("");
+  L.push('รูปแบบ: [{"name":"...","ticker":"...","units":<ตัวเลข>,"cost_per_unit":<ตัวเลข>,"currency":"THB","market":"TH"}]');
+  L.push("");
+  L.push("== ข้อมูลของฉัน ==");
+  L.push(rawText||"(วางข้อมูลที่นี่)");
+  return L.join("\n");
+}
+
 /* ===================================================== SECTION 4 — RENDER */
 const $ = sel => document.querySelector(sel);
 function fmtTHB(n){ if(n==null||!Number.isFinite(n)) return "—";
@@ -1100,10 +1171,12 @@ function renderOnboarding(v){
       <button class="btn primary block" id="ob-start">เริ่มใช้ค่าเริ่มต้น</button>
       <button class="btn block" id="ob-import">นำเข้าไฟล์สำรอง</button>
     </div>
-    <p class="disc">ค่าเริ่มต้น: เป้า ฿100,000/เดือน ภายในปี 2583 · ภาษีหัก ณ ที่จ่ายปันผล 10% · ยังไม่มีรายการสินทรัพย์</p>
+    <button class="btn block" id="ob-sample" style="max-width:420px;margin:10px auto 0">👀 ดูตัวอย่าง (ลองเล่นก่อน)</button>
+    <p class="disc">ค่าเริ่มต้น: เป้า ฿100,000/เดือน ภายในปี 2583 · ภาษีหัก ณ ที่จ่ายปันผล 10% · ยังไม่มีรายการสินทรัพย์ · “ดูตัวอย่าง” ใส่ข้อมูลสมมติให้ลองเล่น (ลบทีหลังได้)</p>
   </div>`;
   $("#ob-start").onclick = ()=>{ const ns=structuredCloneSafe(STATE); ns.meta.onboarded=true; commit(ns); };
   $("#ob-import").onclick = ()=> $("#file-import").click();
+  $("#ob-sample").onclick = ()=>{ const {ok,value}=validateState(sampleState()); if(!ok){ alert("ข้อมูลตัวอย่างผิดพลาด"); return; } commit(value); };   // demo data (validated → derived values filled)
 }
 
 // ---------- DASHBOARD ----------
@@ -1264,7 +1337,7 @@ function renderInvestingDynamic(){
   <!-- holdings -->
   <div class="card">
     <div class="card-head"><h2>พอร์ตการลงทุน <span class="sub">${t.count} รายการ · รวม ${fmtTHB(t.totalValue)}</span></h2>
-      <button class="btn primary sm" id="add-holding">+ เพิ่มรายการ</button></div>
+      <div style="display:flex;gap:6px"><button class="btn sm" id="import-holdings">📥 นำเข้าหลายรายการ</button><button class="btn primary sm" id="add-holding">+ เพิ่มรายการ</button></div></div>
     <div class="grid cols-4" style="margin-bottom:14px">
       <div class="stat"><div class="label">มูลค่ารวม</div><div class="value sm">${fmtTHB(t.totalValue)}</div></div>
       <div class="stat"><div class="label">ปันผลสุทธิ/เดือน</div><div class="value sm">${fmtTHB(t.netMonthlyDividend)}</div></div>
@@ -1498,6 +1571,7 @@ function wireGoalFormEvents(){
 // events inside the re-renderable #inv-dynamic region (holdings actions + prompt buttons)
 function wireInvDynamicEvents(){
   const add=document.getElementById("add-holding"); if(add) add.onclick=()=>openItemForm("holding",null);
+  const imp=document.getElementById("import-holdings"); if(imp) imp.onclick=openImportModal;
   document.querySelectorAll("[data-edit-h]").forEach(b=>b.onclick=()=>openItemForm("holding",findById(STATE.investing.holdings,b.dataset.editH)));
   document.querySelectorAll("[data-info-h]").forEach(b=>b.onclick=()=>openSummaryModal(b.dataset.infoH));
   document.querySelectorAll("[data-del-h]").forEach(b=>b.onclick=()=>deleteItem("holding",b.dataset.delH));
@@ -1809,6 +1883,65 @@ function openSummaryModal(id){
   };
 }
 
+// Bulk-import modal: paste broker text → build prompt → paste AI JSON → preview → append.
+function openImportModal(){
+  const body = `
+    <p class="muted" style="margin-top:0;font-size:13px"><b>ขั้นที่ 1</b> — วางข้อมูลจากโบรกเกอร์/แอป (ก๊อปมาทั้งก้อนได้: ชื่อ/จำนวน/ต้นทุน)</p>
+    <textarea class="promptbox" id="im-raw" style="min-height:90px" placeholder="เช่น  PTT 1000 หุ้น ต้นทุนเฉลี่ย 35.5 บาท ..."></textarea>
+    <button class="btn sm" id="im-build" style="margin:8px 0 14px">สร้าง prompt →</button>
+    <div id="im-prompt-wrap" style="display:none">
+      <p class="muted" style="font-size:13px"><b>ขั้นที่ 2</b> — คัดลอก prompt ไปวางในแชต AI</p>
+      <textarea class="promptbox" id="im-prompt" readonly style="min-height:90px"></textarea>
+      <button class="btn sm" id="im-copy" style="margin:8px 0 14px">คัดลอก prompt</button>
+      <p class="muted" style="font-size:13px"><b>ขั้นที่ 3</b> — วางผลลัพธ์ (JSON) จาก AI</p>
+      <textarea class="promptbox" id="im-paste" style="min-height:90px" placeholder='[{"name":"...","units":...,"cost_per_unit":...}]'></textarea>
+      <button class="btn sm primary" id="im-check" style="margin-top:8px">ตรวจสอบ →</button>
+      <div id="im-preview"></div>
+    </div>`;
+  openModal("นำเข้าหลายรายการด้วย AI", body, [{label:"ปิด",cls:"btn",on:closeModal}]);
+  document.getElementById("im-build").onclick=()=>{
+    const raw=document.getElementById("im-raw").value.trim();
+    if(!raw){ alert("วางข้อมูลจากโบรกเกอร์ก่อน"); return; }
+    document.getElementById("im-prompt").value=buildImportPrompt(raw);
+    document.getElementById("im-prompt-wrap").style.display="";
+  };
+  document.getElementById("im-copy").onclick=function(){ copyTA(document.getElementById("im-prompt"), this); };
+  document.getElementById("im-check").onclick=renderImportPreview;
+}
+
+function renderImportPreview(){
+  const ta=document.getElementById("im-paste");
+  const {holdings, errors}=parseImportHoldings(ta?ta.value:"");
+  const box=document.getElementById("im-preview");
+  let html="";
+  if(errors.length) html+=`<div class="banner bad" style="margin-top:12px"><span class="bi">⚠️</span><div>${errors.map(esc).join("<br>")}</div></div>`;
+  if(holdings.length){
+    html+=`<p class="muted" style="font-size:13px;margin:14px 0 4px"><b>ขั้นที่ 4</b> — ตรวจรายการที่จะเพิ่ม (${holdings.length})</p>`;
+    html+=`<table class="tbl"><thead><tr><th>ชื่อ</th><th class="num">หน่วย</th><th class="num">ต้นทุน/หน่วย</th><th>สกุล</th></tr></thead><tbody>`;
+    holdings.forEach(h=>{ html+=`<tr><td><b>${esc(h.name)}</b>${h.ticker?` <small class="muted">${esc(h.ticker)}</small>`:""}</td>
+      <td class="num">${h.units!=null?fmtNum(h.units,h.units%1?4:0):"—"}</td>
+      <td class="num">${h.cost_per_unit!=null?fmtNative(h.cost_per_unit,h.currency):"—"}</td>
+      <td>${esc(h.currency)}</td></tr>`; });
+    html+=`</tbody></table><p class="muted" style="font-size:12px;margin-top:8px">ราคาตลาดจะตั้งเท่าต้นทุนไว้ก่อน — กด “อัปเดตราคา” ภายหลังเพื่อเติมราคาจริง</p>`;
+  }
+  if(!holdings.length && !errors.length) html+=`<div class="banner info" style="margin-top:14px"><span class="bi">ℹ️</span><div>ไม่พบรายการในผลลัพธ์</div></div>`;
+  box.innerHTML=html;
+  if(holdings.length){
+    const btn=document.createElement("button");
+    btn.className="btn primary block"; btn.style.marginTop="12px";
+    btn.textContent="เพิ่ม "+holdings.length+" รายการเข้าพอร์ต";
+    btn.onclick=()=>commitImport(holdings);
+    box.appendChild(btn);
+  }
+}
+
+function commitImport(holdings){
+  const {state:ns, added}=applyImport(STATE, holdings);
+  closeModal();
+  commit(ns);
+  alert("เพิ่ม "+added+" รายการแล้ว ✓ — อย่าลืมกด “อัปเดตราคา” เพื่อเติมราคาตลาดจริง");
+}
+
 function wireGlobalEvents(){
   $("#tabs").addEventListener("click",e=>{ const b=e.target.closest(".tab"); if(b) render(b.dataset.tab); });
   document.body.addEventListener("click",e=>{ const b=e.target.closest("[data-help]"); if(b) openHelpModal(b.dataset.help); });   // jargon "?" badges (delegated → works on re-rendered content)
@@ -2078,6 +2211,28 @@ function runSelfTests(){
   close("backup days count = 20", backupStatus({lastBackup:"2026-06-06T00:00:00Z"}, true, "2026-06-26T00:00:00Z").days, 20, 0);
   ok("meta.lastBackup survives validate", validateState((()=>{const s=defaultState();s.meta.lastBackup="2026-06-01T00:00:00.000Z";return s;})()).value.meta.lastBackup==="2026-06-01T00:00:00.000Z");
   ok("backup corrupted date → treated as never", backupStatus({lastBackup:"garbage"}, true, "2026-06-26T00:00:00Z").never===true);
+
+  // ---- quick-start: sample portfolio + AI import ----
+  const sv = validateState(sampleState());
+  ok("sampleState is valid + onboarded", sv.ok===true && sv.value.meta.onboarded===true);
+  ok("sampleState has demo holdings + property", sv.value.investing.holdings.length>=3 && sv.value.real_estate.properties.length>=1);
+  close("sample USD holding value via fx (10×210×35)", sv.value.investing.holdings[1].value_thb, 73500, 1);
+  // import parse
+  const im = parseImportHoldings('[{"name":"PTT","ticker":"ptt","units":1000,"cost_per_unit":35.5,"currency":"thb"},{"units":5}]');
+  ok("import parses valid row, drops nameless", im.holdings.length===1 && im.errors.length===1);
+  ok("import uppercases ticker+currency", im.holdings[0].ticker==="PTT" && im.holdings[0].currency==="THB");
+  ok("import price defaults to cost", im.holdings[0].price_per_unit===35.5);
+  ok("import infers TH market from THB", im.holdings[0].market==="TH");
+  ok("import infers US market from USD", parseImportHoldings('[{"name":"AAPL","units":3,"cost_per_unit":200,"currency":"USD"}]').holdings[0].market==="US");
+  // apply import appends (does not overwrite), derives value
+  const impSt = defaultState(); impSt.investing.holdings=[{id:"keep",name:"OLD",units:1,price_per_unit:1,fx_rate:1,currency:"THB",value_thb:1,yield_pct:0,asset_class:"stock",stock_type:"none"}];
+  const impAp = applyImport(impSt, [{name:"NEW",units:100,cost_per_unit:10,price_per_unit:10,currency:"THB",fx_rate:1,market:"TH",asset_class:"stock",stock_type:"none",yield_pct:0,ticker:null}]);
+  ok("import appends (keeps existing)", impAp.added===1 && impAp.state.investing.holdings.length===2 && impAp.state.investing.holdings[0].id==="keep");
+  close("import derives value 100×10×1", impAp.state.investing.holdings[1].value_thb, 1000, 1e-6);
+  ok("import no source mutation", impSt.investing.holdings.length===1);
+  ok("import prompt embeds pasted text", buildImportPrompt("MY BROKER DATA").indexOf("MY BROKER DATA")>=0);
+  ok("import cost=0 → no price placeholder", parseImportHoldings('[{"name":"FREE","units":10,"cost_per_unit":0}]').holdings[0].price_per_unit===null);
+  ok("validate defaults missing yield to 0", (()=>{const s=defaultState();s.investing.holdings=[{name:"NY",units:1,price_per_unit:1,fx_rate:1,currency:"THB"}];const r=validateState(s);return r.ok===true && r.value.investing.holdings[0].yield_pct===0;})());
 
   return R;
 }

@@ -154,6 +154,23 @@ textarea{min-height:80px;resize:vertical}
 .modal-foot{padding:14px 18px;border-top:1px solid var(--border);display:flex;gap:9px;justify-content:flex-end}
 .x{border:none;background:transparent;font-size:22px;color:var(--muted);line-height:1;padding:4px 8px}
 
+/* summary modal (1-page learning view) */
+.sum-type{font-size:12.5px;color:var(--muted);font-weight:600;margin:0 0 13px}
+.sum-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px;margin:0 0 18px}
+.sum-meta .m{background:var(--surface-2);border-radius:var(--radius-sm);padding:9px 11px}
+.sum-meta .m .l{font-size:11px;color:var(--muted);margin-bottom:3px;display:flex;align-items:center;gap:1px}
+.sum-meta .m .v{font-size:15px;font-weight:800;letter-spacing:-.2px}
+.sum-meta .m.good .v{color:var(--green)}
+.sum-meta .m.warn .v{color:var(--amber)}
+.sum-meta .m.bad .v{color:var(--red)}
+.sum-sec-h{font-size:11.5px;font-weight:700;color:var(--muted);margin:0 0 9px;letter-spacing:.02em}
+.sum-body .sum-p{font-size:13.5px;line-height:1.6;margin:0 0 9px}
+.sum-body .sum-p b{color:var(--text)}
+.sum-body .sum-p:last-child{margin-bottom:0}
+.sum-gate{display:flex;gap:10px;align-items:flex-start;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 13px;margin-top:18px;cursor:pointer}
+.sum-gate input{width:18px;height:18px;min-height:auto;margin-top:1px;flex:none}
+.sum-gate .t{font-size:13px;line-height:1.5}
+
 /* misc */
 .muted{color:var(--muted)}
 .empty{text-align:center;padding:30px 16px;color:var(--muted)}
@@ -1115,7 +1132,7 @@ function buildEnrichPrompt(holdings){
   L.push("- quality_score: คะแนนคุณภาพ \"การเงิน\" 0–12 ตามกรอบด้านล่าง (ไม่รวมด่าน circle of competence)");
   L.push("- valuation_verdict: หนึ่งใน "+ENUMS.valuation_verdict.join(" / ")+" (ประเมินราคาปัจจุบัน)");
   L.push("- ticker: สัญลักษณ์ (เฉพาะรายการที่ยังไม่มี)");
-  L.push("- summary: สรุปสั้นเพื่อเรียนรู้ (ไทย) — ทำธุรกิจอะไร · หาเงินยังไง (รายได้หลัก) · ทำไมจัดประเภทนี้ · ตัวเลขสำคัญ 2–3 ตัว · ความเสี่ยงหลัก 1 บรรทัด (กระชับ ขึ้นบรรทัดใหม่แต่ละหัวข้อ)");
+  L.push("- summary: สรุปสั้นเพื่อเรียนรู้ (ไทย) บรรทัดละ 1 หัวข้อ ขึ้นต้นด้วยหัวข้อแล้วตามด้วย ':' คั่นแต่ละบรรทัดด้วย \\n — หัวข้อที่ต้องมี: ธุรกิจ / หาเงินยังไง / ตัวเลขสำคัญ / ความเสี่ยง (กระชับ หัวข้อละ 1 บรรทัด)");
   L.push("");
   L.push(SCORING_FRAMEWORK);
   L.push("");
@@ -1127,7 +1144,7 @@ function buildEnrichPrompt(holdings){
   });
   L.push("");
   L.push("ตอบกลับเป็น JSON array เท่านั้น ห้ามมีข้อความอื่น รูปแบบ:");
-  L.push('  [{"id":"<id เดิม>","asset_class":"...","stock_type":"...","yield_pct":<ตัวเลข>,"quality_score":<0-12>,"valuation_verdict":"...","ticker":"...","summary":"ทำอะไร...\\nหาเงินยังไง...\\nความเสี่ยง..."}]');
+  L.push('  [{"id":"<id เดิม>","asset_class":"...","stock_type":"...","yield_pct":<ตัวเลข>,"quality_score":<0-12>,"valuation_verdict":"...","ticker":"...","summary":"ธุรกิจ: ...\\nหาเงินยังไง: ...\\nตัวเลขสำคัญ: ...\\nความเสี่ยง: ..."}]');
   L.push("");
   L.push(DISCLAIMER_TH);
   return L.join("\n");
@@ -1157,6 +1174,16 @@ function fmtPct(n,d){ if(n==null||!Number.isFinite(n)) return "—"; return n.to
 function fmtDateTH(iso){ try{ return new Date(iso).toLocaleDateString("th-TH",{day:"2-digit",month:"2-digit",year:"numeric"}); }catch(e){ return "—"; } }
 function fmtNative(n,ccy){ if(n==null||!Number.isFinite(n)) return "—"; if(!ccy||ccy==="THB") return fmtTHB(n); return fmtNum(n, n%1?2:0)+" "+esc(ccy); }   // esc: ccy is user/AI-sourced, goes to innerHTML
 function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c])); }
+// summary text → structured HTML: one <p> per line; bold the "หัวข้อ:" prefix when present. esc all (AI/user-sourced).
+function fmtSummary(text){
+  const lines=String(text==null?"":text).split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  if(!lines.length) return "";
+  return lines.map(line=>{
+    const m=line.match(/^([^:：]{1,28})[:：]\s*(.+)$/);   // "Label: content" → bold label
+    return m ? `<p class="sum-p"><b>${esc(m[1].trim())}</b> ${esc(m[2].trim())}</p>`
+             : `<p class="sum-p">${esc(line)}</p>`;
+  }).join("");
+}
 
 // ---------- jargon help (beginner-friendly explanations) ----------
 const HELP = {
@@ -1167,7 +1194,7 @@ const HELP = {
   buckets:{t:"กรอบสัดส่วนพอร์ต 4 กลุ่ม", b:"แบ่งหุ้นตามบทบาท: Compounder/Growth (โตเร็ว) · Dividend Grower (ปันผลโตสม่ำเสมอ) · High-Yield (ปันผลสูง เช่น REIT) · Defensive (ตั้งรับ ทนวิกฤต) + เงินสด. แอปจะแนะนำสัดส่วนเป้าหมายตาม 'ผลตอบแทนที่ต้องการ' — ยิ่งต้องการสูง ยิ่งเอียงไป Growth"},
   quality_score:{t:"คะแนนคุณภาพการเงิน", b:"คะแนน 0–12 ที่ AI ประเมินจากงบการเงิน (กระแสเงินสด หนี้ มาร์จิน ROE/ROIC ฯลฯ) ยิ่งสูงยิ่งคุณภาพดี. ส่วนด่าน 'คุณเข้าใจธุรกิจนี้ไหม' เป็นการตัดสินของคุณเอง AI ไม่ให้คะแนนแทน"},
 };
-function helpBadge(key){ return `<button class="help" data-help="${key}" title="คำอธิบาย" aria-label="คำอธิบาย">?</button>`; }
+function helpBadge(key){ return `<button class="help" data-help="${esc(key)}" title="คำอธิบาย" aria-label="คำอธิบาย">?</button>`; }
 function openHelpModal(key){ const h=HELP[key]; if(!h) return;
   openModal(h.t, `<div style="font-size:14px;line-height:1.75">${esc(h.b)}</div>`, [{label:"เข้าใจแล้ว",cls:"btn primary",on:closeModal}]); }
 
@@ -1917,25 +1944,32 @@ function commitEnrich(items){
 function openSummaryModal(id){
   const h = findById(STATE.investing.holdings, id);
   if(!h) return;
-  const chips = [
-    `<span class="chip">${esc(LABELS.asset_class[h.asset_class]||h.asset_class)}</span>`,
-    h.stock_type&&h.stock_type!=="none"?`<span class="chip">${esc(BUCKET_LABEL[bucketOf(h)]||"")}</span>`:"",
-    h.quality_score!=null?`<span class="chip ${h.quality_score>=10?'good':(h.quality_score>=7?'warn':'bad')}">คุณภาพการเงิน ${fmtNum(h.quality_score,0)}/12</span>`+helpBadge("quality_score"):"",
-    (h.valuation_verdict&&h.valuation_verdict!=="unknown")?`<span class="chip">ราคา: ${esc(LABELS.valuation_verdict[h.valuation_verdict])}</span>`:"",
-    h.yield_pct>0?`<span class="chip">yield ${fmtPct(h.yield_pct)}</span>`:"",
-    h.value_thb>0?`<span class="chip">มูลค่า ${fmtTHB(h.value_thb)}</span>`:"",
-  ].filter(Boolean).join(" ");
+  // type line: asset class · portfolio bucket (small muted text — not chips)
+  const typeLine = [
+    LABELS.asset_class[h.asset_class]||h.asset_class,
+    (h.stock_type&&h.stock_type!=="none") ? BUCKET_LABEL[bucketOf(h)] : ""
+  ].filter(Boolean).join("  ·  ");
+  // metric grid: tidy mini stat boxes instead of a row of mixed chips
+  const metrics = [];
+  if(h.quality_score!=null) metrics.push({l:"คุณภาพการเงิน"+helpBadge("quality_score"), v:fmtNum(h.quality_score,0)+"/12", cls:h.quality_score>=10?"good":(h.quality_score>=7?"warn":"bad")});
+  if(h.valuation_verdict&&h.valuation_verdict!=="unknown") metrics.push({l:"ระดับราคา", v:esc(LABELS.valuation_verdict[h.valuation_verdict])});
+  if(h.yield_pct>0) metrics.push({l:"ผลตอบแทน (yield)", v:fmtPct(h.yield_pct)});
+  if(h.value_thb>0) metrics.push({l:"มูลค่า", v:fmtTHB(h.value_thb)});
+  const metaHtml = metrics.length
+    ? `<div class="sum-meta">${metrics.map(m=>`<div class="m ${m.cls||""}"><div class="l">${m.l}</div><div class="v">${m.v}</div></div>`).join("")}</div>`
+    : "";
   const summaryHtml = h.ai_summary
-    ? esc(h.ai_summary).replace(/\n/g,"<br>")
-    : `<span class="muted">ยังไม่มีสรุป — กดปุ่ม “🏷️ จัดประเภท / ตรวจข้อมูล” แล้วให้ AI สรุปธุรกิจมาให้ (ดูว่าหุ้นตัวนี้หาเงินยังไง)</span>`;
+    ? `<div class="sum-sec-h">ธุรกิจนี้หาเงินยังไง</div><div class="sum-body">${fmtSummary(h.ai_summary)}</div>`
+    : `<div class="banner info"><span class="bi">💡</span><div>ยังไม่มีสรุป — กดปุ่ม “🏷️ จัดประเภท / ตรวจข้อมูล” แล้วให้ AI สรุปธุรกิจมาให้ (หุ้นตัวนี้หาเงินยังไง)</div></div>`;
   const body = `
-    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">${chips}</div>
-    <div style="font-size:14px;line-height:1.65">${summaryHtml}</div>
-    <label class="row-check" style="margin-top:16px;display:flex;gap:9px;align-items:flex-start;cursor:pointer">
+    ${typeLine?`<div class="sum-type">${esc(typeLine)}</div>`:""}
+    ${metaHtml}
+    ${summaryHtml}
+    <label class="sum-gate">
       <input type="checkbox" id="sum-understood" ${h.understood?"checked":""}/>
-      <span>ฉันเข้าใจว่าธุรกิจนี้หาเงินยังไง <small class="muted">— ด่านนี้เป็นการตัดสินของเจ้าของพอร์ต (AI ไม่ให้คะแนนแทน)</small></span>
+      <span class="t">ฉันเข้าใจว่าธุรกิจนี้หาเงินยังไง<br><small class="muted">ด่านนี้เป็นการตัดสินของเจ้าของพอร์ต — AI ไม่ให้คะแนนแทน</small></span>
     </label>
-    <p class="disc" style="margin-top:14px">${esc(DISCLAIMER_TH)}</p>`;
+    <p class="disc">${esc(DISCLAIMER_TH)}</p>`;
   openModal((h.name||"สรุปหุ้น")+(h.ticker?" ("+h.ticker+")":""), body, [{label:"ปิด",cls:"btn",on:closeModal}]);
   const cb=document.getElementById("sum-understood");
   if(cb) cb.onchange=()=>{                          // owner's competence gate — persists, re-renders tab behind modal
@@ -2254,6 +2288,13 @@ function runSelfTests(){
   const sumPv = previewEnrich([{id:"h1",name:"A",ai_summary:null,asset_class:"stock",stock_type:"none",yield_pct:0,quality_score:null,valuation_verdict:"unknown",ticker:"X"}],[{id:"h1",summary:"xx"}]);
   ok("enrich preview flags summary change", sumPv.rows.length===1 && sumPv.rows[0].changes.some(c=>c.field==="สรุป"));
   ok("enrich prompt asks summary + splits competence", buildEnrichPrompt([{id:"h1",name:"A",market:"TH",asset_class:"stock",stock_type:"none"}]).indexOf("summary")>=0 && buildEnrichPrompt([{id:"h1",name:"A",market:"TH",asset_class:"stock",stock_type:"none"}]).indexOf("circle of competence")>=0);
+  // fmtSummary: structured render (bold label, one <p>/line, escape, plain fallback)
+  ok("fmtSummary bolds label", fmtSummary("ธุรกิจ: ขายของ").indexOf("<b>ธุรกิจ</b>")>=0);
+  ok("fmtSummary splits lines", (fmtSummary("ก: 1\nข: 2").match(/sum-p/g)||[]).length===2);
+  ok("fmtSummary escapes html", fmtSummary("x: <img src=x onerror=1>").indexOf("&lt;img")>=0 && fmtSummary("x: <img>").indexOf("<img>")<0);
+  ok("fmtSummary plain line no bold", fmtSummary("ไม่มีโคลอนตรงนี้เลย").indexOf("<b>")<0);
+  ok("fmtSummary drops blank lines", (fmtSummary("ก: 1\n\n\nข: 2").match(/sum-p/g)||[]).length===2);
+  ok("fmtSummary empty → empty", fmtSummary("")==="" && fmtSummary(null)==="");
   // v3→v4 migration: ai_summary/understood defaults, value preserved
   const v3h={schemaVersion:3, meta:{onboarded:true}, goal:defaultState().goal, settings:defaultState().settings, investing:{holdings:[{id:"u",name:"Z",asset_class:"stock",stock_type:"none",units:10,price_per_unit:5,fx_rate:1,currency:"THB",yield_pct:2}]}, real_estate:{properties:[]}, insurance:{policies:[]}};
   const m4=validateState(migrateState(JSON.parse(JSON.stringify(v3h))));

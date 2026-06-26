@@ -760,6 +760,23 @@ function glidedTarget(reqTarget, yearsLeft, glideYears){
   return {a, t};
 }
 
+// Plain-language goal-trajectory verdict for the dashboard (derives from the existing projection — no new math).
+// Returns {level: good|warn|bad|neutral, icon, title, detail}. Pure: takes the derived bundle + goal.
+function goalStatus(d, goal){
+  if(!d || d.needsInput || d.nest==null)
+    return {level:"neutral", icon:"🧭", title:"เริ่มต้นที่นี่", detail:"กรอกเป้าหมาย + เพิ่มสินทรัพย์ เพื่อให้ระบบบอกว่าคุณกำลังตามแผนหรือไม่"};
+  if(d.target && d.target.brake)
+    return {level:"bad", icon:"⚠️", title:"เป้าหมายตึงเกินไป", detail:"ผลตอบแทนที่ต้องการสูงเกินกว่าจะไล่ตามอย่างปลอดภัย — ปรับแผน: ออมเพิ่ม / ยืดเวลา / ลดเป้ารายได้"};
+  const ty = goal.target_year;
+  if(d.proj && d.proj.reachable){
+    const hy = d.proj.hitYear, yr = "ปี "+(hy+543)+" (ค.ศ. "+hy+")";
+    if(hy < ty)  return {level:"good", icon:"🎉", title:"เร็วกว่าแผน", detail:"ตามสมมติฐานปัจจุบัน คาดถึงเป้า "+yr+" — ก่อนกำหนด (พ.ศ. "+(ty+543)+")"};
+    if(hy === ty) return {level:"good", icon:"✅", title:"ตามแผน", detail:"ตามสมมติฐานปัจจุบัน คาดถึงเป้าพอดี "+yr};
+    return {level:"warn", icon:"⚠️", title:"ช้ากว่าแผน", detail:"ตามสมมติฐานปัจจุบัน จะถึงเป้า "+yr+" — ช้ากว่าที่ตั้งไว้ (พ.ศ. "+(ty+543)+") · ลองออมเพิ่มหรือยืดเวลา"};
+  }
+  return {level:"warn", icon:"⚠️", title:"ยังไม่ถึงเป้า", detail:"ตามสมมติฐานปัจจุบันยังไปไม่ถึงเป้าในกรอบเวลา — ลองออมเพิ่ม / ปรับคาดการเติบโต / ปรับเป้า"};
+}
+
 // ---- whole-portfolio aggregates (state-level) ----
 function netWorthBreakdown(state){
   const invest = state.investing.holdings.reduce((s,h)=>s+nn(h.value_thb),0);
@@ -1309,6 +1326,8 @@ function renderDashboard(v){
   const g = STATE.goal;
   const prog = g.target_monthly_thb>0 ? Math.min(100, pm.total/g.target_monthly_thb*100) : 0;
   const d = deriveInvesting(STATE, currentMonth());
+  const gs = goalStatus(d, g);
+  const gsLevel = gs.level==="neutral" ? "info" : gs.level;
 
   const segs = [
     {label:"การลงทุน", value:Math.max(0,nw.invest), color:"var(--c-invest)"},
@@ -1317,7 +1336,7 @@ function renderDashboard(v){
   ].filter(s=>s.value>0);
 
   const warns=[];
-  if(d.target && d.target.brake && !d.needsInput) warns.push(`<div class="banner bad"><span class="bi">⚠️</span><div><b>ผลตอบแทนที่ต้องการสูงเกินไป</b><br>${esc(BRAKE_MSG)}</div></div>`);
+  // (brake is surfaced by the goalStatus verdict banner above — not repeated here)
   if(d.glide && d.glide.active) warns.push(`<div class="banner info"><span class="bi">🛬</span><div><b>เข้าสู่ช่วง glide path</b><br>${esc(d.glide.message)}</div></div>`);
   if(d.conc && d.conc.flagged) warns.push(`<div class="banner warn"><span class="bi">🎯</span><div><b>พอร์ตกระจุกตัว</b> — ${esc(d.conc.topName)} คิดเป็น ${d.conc.topSharePct.toFixed(0)}% ของพอร์ตลงทุน</div></div>`);
   const hasData = STATE.investing.holdings.length || STATE.real_estate.properties.length || STATE.insurance.policies.length;
@@ -1356,6 +1375,8 @@ function renderDashboard(v){
       <div class="legend"><span>💵 ปันผลสุทธิ ${fmtTHB(pm.dividend)}</span><span>🏠 ค่าเช่าสุทธิ ${fmtTHB(pm.rent)}</span></div>
     </div>
   </div>
+
+  <div class="banner ${gsLevel}" style="margin-top:14px;align-items:flex-start"><span class="bi">${esc(gs.icon)}</span><div><b>${esc(gs.title)}</b><br><span style="font-size:13px">${esc(gs.detail)}</span></div></div>
 
   ${warns.length? `<div class="grid">${warns.join("")}</div>`:""}
 
@@ -2240,6 +2261,14 @@ function runSelfTests(){
   // banner window aligns with the numbers moving: inactive at exactly glide_years, active just inside
   ok("glide banner off at boundary (==glide_years)", glidePathStatus({target_year:2032},{glide_years:6},2026).active===false);
   ok("glide banner on inside window (<glide_years)", glidePathStatus({target_year:2031},{glide_years:6},2026).active===true);
+  // ---- goalStatus: plain-language on-track verdict ----
+  ok("goalStatus needsInput → neutral", goalStatus({needsInput:true}, {target_year:2040}).level==="neutral");
+  ok("goalStatus no nest → neutral", goalStatus({needsInput:false, nest:null}, {target_year:2040}).level==="neutral");
+  ok("goalStatus brake → bad", goalStatus({needsInput:false, nest:1, target:{brake:true}}, {target_year:2040}).level==="bad");
+  ok("goalStatus hit before target → good 🎉", (()=>{ const r=goalStatus({needsInput:false,nest:1,target:{brake:false},proj:{reachable:true,hitYear:2035}},{target_year:2040}); return r.level==="good" && r.icon==="🎉"; })());
+  ok("goalStatus hit == target → good ✅", (()=>{ const r=goalStatus({needsInput:false,nest:1,target:{brake:false},proj:{reachable:true,hitYear:2040}},{target_year:2040}); return r.level==="good" && r.icon==="✅"; })());
+  ok("goalStatus hit after target → warn", goalStatus({needsInput:false,nest:1,target:{brake:false},proj:{reachable:true,hitYear:2045}},{target_year:2040}).level==="warn");
+  ok("goalStatus not reachable → warn", goalStatus({needsInput:false,nest:1,target:{brake:false},proj:{reachable:false,hitYear:null}},{target_year:2040}).level==="warn");
   // validate-before-commit: target=0 import rejected
   const bad = validateState(Object.assign(defaultState(),{goal:Object.assign(defaultState().goal,{target_monthly_thb:0})}));
   ok("validate rejects target=0", bad.ok===false);

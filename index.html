@@ -240,7 +240,7 @@ footer.foot{text-align:center;color:var(--faint);font-size:12px;padding:24px var
 =================================================================================== */
 
 /* ===================================================== SECTION 0 — CONSTANTS */
-const SCHEMA_VERSION = 2;   // v2: holdings recorded as units × price_per_unit (+ cost_per_unit)
+const SCHEMA_VERSION = 4;   // v4: holdings gain ai_summary (AI business summary) + understood (owner's competence gate)
 const STORAGE_KEY = "assetManager.state";
 const BACKUP_KEY  = "assetManager.state.bak";
 
@@ -392,6 +392,13 @@ function migrateState(obj){
   // v1→v2: holdings gain units/price_per_unit/cost_per_unit (nullable). Old lump holdings keep
   // their value_thb/cost_basis_thb and work unchanged — normalized as null fields in validateState.
   if(v<2){ v=2; }
+  // v2→v3: holdings gain currency (default THB) + fx_rate (default 1); price_per_unit/cost_per_unit
+  // reinterpreted as native-currency amounts. For migrated THB holdings fx=1 → value_thb unchanged.
+  // No structural transform — validateState fills currency/fx defaults.
+  if(v<3){ v=3; }
+  // v3→v4: holdings gain ai_summary (AI business summary) + understood (owner's competence gate).
+  // Additive — validateState fills defaults (null / false). No structural transform.
+  if(v<4){ v=4; }
   s.schemaVersion = SCHEMA_VERSION;
   return s;
 }
@@ -438,8 +445,10 @@ function validateState(obj){
       asset_class: ENUMS.asset_class.includes(h.asset_class)?h.asset_class:"stock",
       stock_type: ENUMS.stock_type.includes(h.stock_type)?h.stock_type:"none",
       units: (h.units==null||h.units==="")?null:Number(h.units),                       // v2
-      price_per_unit: (h.price_per_unit==null||h.price_per_unit==="")?null:Number(h.price_per_unit),  // v2
-      cost_per_unit: (h.cost_per_unit==null||h.cost_per_unit==="")?null:Number(h.cost_per_unit),      // v2
+      currency: (String(h.currency||"THB").trim().toUpperCase().slice(0,6))||"THB",    // v3 native currency code
+      fx_rate: (h.fx_rate==null||h.fx_rate==="")?1:Number(h.fx_rate),                  // v3 THB per 1 native unit
+      price_per_unit: (h.price_per_unit==null||h.price_per_unit==="")?null:Number(h.price_per_unit),  // v2/v3 native
+      cost_per_unit: (h.cost_per_unit==null||h.cost_per_unit==="")?null:Number(h.cost_per_unit),      // v2/v3 native
       value_thb: (h.value_thb==null||h.value_thb==="")?0:Number(h.value_thb),
       yield_pct: Number(h.yield_pct),
       cost_basis_thb: (h.cost_basis_thb==null||h.cost_basis_thb==="")?null:Number(h.cost_basis_thb),
@@ -447,12 +456,15 @@ function validateState(obj){
       valuation_verdict: ENUMS.valuation_verdict.includes(h.valuation_verdict)?h.valuation_verdict:"unknown",
       market: ENUMS.market.includes(h.market)?h.market:"TH",
       notes: h.notes?String(h.notes):null, created_at: h.created_at||nowISO(),
+      ai_summary: h.ai_summary?String(h.ai_summary).slice(0,2000):null,   // v4 AI business summary (for learning popup)
+      understood: !!h.understood,                                         // v4 owner's competence gate (human, not AI)
     };
     if(!o.name) errors.push("holding #"+(i+1)+" ไม่มีชื่อ");
     if(o.units!=null && !(isNum(o.units)&&o.units>=0)) errors.push("holding "+(o.name||i+1)+": จำนวนหน่วยไม่ถูกต้อง");
     if(o.price_per_unit!=null && !(isNum(o.price_per_unit)&&o.price_per_unit>=0)) errors.push("holding "+(o.name||i+1)+": ราคา/หน่วยไม่ถูกต้อง");
     if(o.cost_per_unit!=null && !(isNum(o.cost_per_unit)&&o.cost_per_unit>=0)) errors.push("holding "+(o.name||i+1)+": ต้นทุน/หน่วยไม่ถูกต้อง");
-    computeHoldingDerived(o);   // value_thb / cost_basis_thb = units × price/cost when present (else keep legacy lump)
+    if(!(isNum(o.fx_rate)&&o.fx_rate>0)) o.fx_rate=1;   // v3 fx must be positive; default to 1 (THB)
+    computeHoldingDerived(o);   // value_thb / cost_basis_thb = units × price × fx when present (else keep legacy lump)
     if(!(isNum(o.value_thb)&&o.value_thb>=0)) errors.push("holding "+(o.name||i+1)+": มูลค่าไม่ถูกต้อง");
     if(!(isNum(o.yield_pct)&&o.yield_pct>=0)) errors.push("holding "+(o.name||i+1)+": yield ไม่ถูกต้อง");
     if(o.cost_basis_thb!=null && !(isNum(o.cost_basis_thb)&&o.cost_basis_thb>=0)) errors.push("holding "+o.name+": cost ไม่ถูกต้อง");
@@ -534,9 +546,12 @@ function monthsBetween(a, b){
 function computeHoldingDerived(h){
   // units semantics: null = legacy lump (keep stored value_thb) · >0 = compute from market data
   // · 0 = zero position (no override). Empty form fields save as null (not 0) to preserve the sentinel.
-  if(h.units>0 && h.price_per_unit>0) h.value_thb = h.units * h.price_per_unit;
+  // v3: price_per_unit & cost_per_unit are in native currency; fx_rate (THB per native unit, default 1)
+  // converts to THB. value_thb stays the canonical field every downstream calc reads (blast radius = 0).
+  const fx = (h.fx_rate>0) ? h.fx_rate : 1;
+  if(h.units>0 && h.price_per_unit>0) h.value_thb = h.units * h.price_per_unit * fx;
   if(!Number.isFinite(h.value_thb)) h.value_thb = 0;
-  if(h.units>0 && h.cost_per_unit>0) h.cost_basis_thb = h.units * h.cost_per_unit;
+  if(h.units>0 && h.cost_per_unit>0) h.cost_basis_thb = h.units * h.cost_per_unit * fx;
   return h;
 }
 function holdingGrossAnnual(h){ return nn(h.value_thb) * nn(h.yield_pct) / 100; }
@@ -702,6 +717,194 @@ function deriveInvesting(state, nowMonth){
   return { totals, nest, base, months, rr, rrPct, target, curAlloc, drift, proj, glide, conc, needsInput };
 }
 
+// ---- AI price round-trip (pure: parse → preview → apply). No network: AI fetches prices, user pastes back ----
+function pickNum(){
+  for(let k=0;k<arguments.length;k++){ const a=arguments[k]; if(a==null) continue;
+    const n = typeof a==="string" ? Number(a.replace(/[, ]/g,"")) : Number(a);
+    if(Number.isFinite(n)) return n; }
+  return null;
+}
+// Parse an AI reply into [{id, priceThb, native, ccy}]. Tolerates ```fences```, surrounding prose,
+// array / {prices:[…]} / {id:price} map / single object. Rejects rows without id or with price<=0.
+// Shared: pull a JSON array of objects out of an AI reply (tolerates ```fences```, surrounding prose,
+// array / {prices|items|holdings:[…]} / {id:value} map / single object). Returns {arr} or {error}.
+function extractJsonArray(text){
+  if(typeof text!=="string" || !text.trim()) return {arr:null, error:"ยังไม่ได้วางผลลัพธ์จาก AI"};
+  let s=text.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);   // pull out fenced block if present
+  if(fence) s=fence[1].trim();
+  const start = s.search(/[\[{]/);
+  if(start<0) return {arr:null, error:"ไม่พบ JSON ในข้อความที่วาง"};
+  let js = s.slice(start);
+  const open = js[0];                                        // trim trailing prose by matching the open bracket
+  const end = open==="[" ? js.lastIndexOf("]") : js.lastIndexOf("}");   // limit: trailing prose with brackets (e.g. "[2]") → JSON.parse catch returns a usable error
+  if(end>=0) js=js.slice(0,end+1);
+  let data;
+  try{ data=JSON.parse(js); }catch(e){ return {arr:null, error:"แปลง JSON ไม่สำเร็จ — ตรวจรูปแบบที่ AI ตอบกลับ"}; }
+  let arr;
+  if(Array.isArray(data)) arr=data;
+  else if(data && Array.isArray(data.prices)) arr=data.prices;
+  else if(data && Array.isArray(data.items)) arr=data.items;
+  else if(data && Array.isArray(data.holdings)) arr=data.holdings;
+  // guard widened from original parsePriceResponse to also cover items/holdings wrappers (intentional)
+  else if(data && (data.prices!=null || data.items!=null || data.holdings!=null))   // present but not an array → malformed
+    return {arr:null, error:"รูปแบบ JSON ไม่ถูกต้อง — ต้องเป็น array"};
+  else if(data && typeof data==="object"){
+    // Object.keys never yields "__proto__" from JSON.parse output (V8 ES2015+),
+    // so the Object.assign below cannot trigger prototype pollution.
+    const keys=Object.keys(data);
+    const looksLikeMap = keys.length>0 && keys.every(k=> typeof data[k]==="number" || (data[k]&&typeof data[k]==="object" && !Array.isArray(data[k])));
+    arr = looksLikeMap
+      ? keys.map(k=> typeof data[k]==="number" ? {id:k, price_thb:data[k]} : Object.assign({id:k}, data[k]))
+      : [data];   // single object
+  }
+  if(!Array.isArray(arr)) return {arr:null, error:"รูปแบบ JSON ไม่ใช่รายการ"};
+  return {arr, error:null};
+}
+// Parse a price reply into [{id, priceThb, native, fx, ccy}]. Rejects rows without id or a usable
+// price (THB, or native+fx). resolvePrice decides how THB-only vs native+fx is applied.
+function parsePriceResponse(text){
+  const {arr, error}=extractJsonArray(text);
+  if(error) return {prices:[], errors:[error]};
+  const errors=[], prices=[];
+  arr.forEach((e,i)=>{
+    if(!e || typeof e!=="object"){ errors.push("รายการ #"+(i+1)+" ไม่ถูกต้อง"); return; }
+    const id = e.id!=null ? String(e.id) : null;
+    const priceThb = pickNum(e.price_thb, e.priceThb, e.thb, e.price, e.value);
+    const native = pickNum(e.native, e.native_price, e.price_native);
+    const fx = pickNum(e.fx, e.fx_rate, e.rate);
+    const ccyRaw = e.ccy||e.currency||e.native_currency||null;
+    const hasThb = priceThb!=null && priceThb>0;
+    const hasNative = native!=null && native>0 && fx!=null && fx>0;   // native price needs fx to convert
+    if(id==null){ errors.push("รายการ #"+(i+1)+" ไม่มี id"); return; }
+    if(!hasThb && !hasNative){ errors.push("รายการ "+id+": ราคาไม่ถูกต้อง"); return; }
+    prices.push({id, priceThb: hasThb?priceThb:null, native: (native!=null&&native>0)?native:null,
+      fx: (fx!=null&&fx>0)?fx:null, ccy: ccyRaw?String(ccyRaw).trim().toUpperCase().slice(0,6):null});   // match validateState ccy contract
+  });
+  return {prices, errors};
+}
+// Resolve a parsed price entry to {native, fx, ccy} against a holding. Prefer native+fx; else use the
+// THB value (keep holding's currency + fx, back out native so value_thb === the THB the AI gave).
+function resolvePrice(h, p){
+  const hFx = (h && h.fx_rate>0) ? h.fx_rate : 1;
+  if(p.native!=null && p.native>0 && p.fx!=null && p.fx>0)
+    return {native:p.native, fx:p.fx, ccy:(p.ccy||(h&&h.currency)||"THB")};
+  if(p.priceThb!=null && p.priceThb>0)
+    return {native:p.priceThb/hFx, fx:hFx, ccy:((h&&h.currency)||"THB")};
+  return {native:null, fx:hFx, ccy:((h&&h.currency)||"THB")};
+}
+// Dry-run: which unit-based holdings would change, by how much, what is unmatched / left untouched.
+function previewPriceUpdate(holdings, prices){
+  const byId={}; holdings.forEach(h=>byId[h.id]=h);
+  const rows=[], unmatched=[], seen={};
+  prices.forEach(p=>{
+    const h=byId[p.id];
+    if(!h || !(h.units>0)){ unmatched.push(p); return; }   // no match, or lump holding (no units to price)
+    const r=resolvePrice(h,p);
+    if(r.native==null){ unmatched.push(p); return; }
+    seen[p.id]=true;
+    const newValue = h.units * r.native * r.fx;
+    rows.push({id:h.id, name:h.name, ticker:h.ticker||null, units:h.units,
+      oldPrice:nn(h.price_per_unit), newPrice:r.native, ccy:r.ccy, fx:r.fx,
+      oldValue:nn(h.value_thb), newValue,
+      pctChange: h.price_per_unit>0 ? (r.native-h.price_per_unit)/h.price_per_unit*100 : null});
+  });
+  const notUpdated = holdings.filter(h=>h.units>0 && !seen[h.id]).map(h=>h.name);
+  return {rows, unmatched, notUpdated};
+}
+// Write new prices into a CLONED state (source untouched). Only unit-based holdings; value re-derived.
+// Updates price_per_unit (native), fx_rate, and currency together — the AI button refreshes FX too.
+function applyPrices(state, prices){
+  const ns = JSON.parse(JSON.stringify(state));
+  const byId={}; ns.investing.holdings.forEach(h=>byId[h.id]=h);
+  let applied=0;
+  prices.forEach(p=>{
+    const h=byId[p.id];
+    if(!h || !(h.units>0)) return;
+    const r=resolvePrice(h,p);
+    if(r.native==null) return;
+    h.price_per_unit = r.native;
+    if(r.fx>0) h.fx_rate = r.fx;
+    if(r.ccy) h.currency = r.ccy;
+    computeHoldingDerived(h);
+    applied++;
+  });
+  return {state:ns, applied};
+}
+
+// ---- AI enrich/classify round-trip (pure). User keeps name/units/cost/market; AI fills the analytical fields ----
+// Parse an enrich reply into [{id, asset_class?, stock_type?, yield_pct?, quality_score?, valuation_verdict?, ticker?}].
+// Each field is included ONLY if valid (enum in range / number in range). Row needs id + ≥1 usable field.
+function parseEnrichResponse(text){
+  const {arr, error}=extractJsonArray(text);
+  if(error) return {items:[], errors:[error]};
+  const errors=[], items=[];
+  arr.forEach((e,i)=>{
+    if(!e || typeof e!=="object"){ errors.push("รายการ #"+(i+1)+" ไม่ถูกต้อง"); return; }
+    const id = e.id!=null ? String(e.id) : null;
+    if(id==null){ errors.push("รายการ #"+(i+1)+" ไม่มี id"); return; }
+    const out={id};
+    if(ENUMS.asset_class.includes(e.asset_class)) out.asset_class=e.asset_class;
+    if(ENUMS.stock_type.includes(e.stock_type)) out.stock_type=e.stock_type;
+    if(ENUMS.valuation_verdict.includes(e.valuation_verdict)) out.valuation_verdict=e.valuation_verdict;
+    const y=pickNum(e.yield_pct, e.yield, e.dividend_yield); if(y!=null && y>=0 && y<=100) out.yield_pct=y;   // reject hallucinated yields
+    const q=pickNum(e.quality_score, e.quality, e.score); if(q!=null && q>=0 && q<=12) out.quality_score=q;
+    if(e.ticker!=null && String(e.ticker).trim()) out.ticker=String(e.ticker).trim().toUpperCase().slice(0,20);
+    if(e.summary!=null && String(e.summary).trim()) out.summary=String(e.summary).trim().slice(0,2000);   // business summary for learning popup
+    if(Object.keys(out).length<=1){ errors.push("รายการ "+id+": ไม่มีข้อมูลที่ใช้ได้"); return; }
+    items.push(out);
+  });
+  return {items, errors};
+}
+const ENRICH_FIELDS=[
+  {k:"asset_class", label:"ชนิด",  map:()=>LABELS.asset_class},
+  {k:"stock_type",  label:"ประเภท",map:()=>LABELS.stock_type},
+  {k:"yield_pct",   label:"yield", fmt:v=>fmtPct(v)},
+  {k:"quality_score",label:"คะแนน",fmt:v=>v+"/12"},
+  {k:"valuation_verdict",label:"ราคา",map:()=>LABELS.valuation_verdict},
+  {k:"ticker",      label:"Ticker"},
+];
+// Dry-run: per holding, which fields AI would change (old→new). ticker is fill-only-if-blank.
+function previewEnrich(holdings, items){
+  const byId={}; holdings.forEach(h=>byId[h.id]=h);
+  const rows=[], unmatched=[], seen={};
+  items.forEach(it=>{
+    const h=byId[it.id];
+    if(!h){ unmatched.push(it); return; }
+    const changes=[];
+    ENRICH_FIELDS.forEach(f=>{
+      if(!(f.k in it)) return;
+      if(f.k==="ticker" && h.ticker) return;        // never overwrite an existing ticker
+      const oldV=h[f.k], newV=it[f.k];
+      if(oldV===newV) return;                        // skip no-ops (already correct)
+      const disp = v => v==null||v===""?"—":(f.map?(f.map()[v]||v):(f.fmt?f.fmt(v):v));
+      changes.push({field:f.label, old:disp(oldV), neu:disp(newV)});
+    });
+    if("summary" in it && it.summary && it.summary!==h.ai_summary)   // long text → compact indicator, not a diff dump
+      changes.push({field:"สรุป", old:(h.ai_summary?"(เดิม)":"—"), neu:"อัปเดตสรุปธุรกิจ"});
+    if(changes.length){ seen[it.id]=true; rows.push({id:h.id, name:h.name, ticker:h.ticker||null, changes}); }
+  });
+  const noChange = items.filter(it=>byId[it.id] && !seen[it.id]).length;
+  return {rows, unmatched, noChange};
+}
+// Write enrich fields into a CLONED state (source untouched). Never touches name/units/cost/value/price/fx.
+function applyEnrich(state, items){
+  const ns=JSON.parse(JSON.stringify(state));
+  const byId={}; ns.investing.holdings.forEach(h=>byId[h.id]=h);
+  let applied=0;
+  items.forEach(it=>{
+    const h=byId[it.id]; if(!h) return;
+    let touched=false;
+    ["asset_class","stock_type","valuation_verdict","yield_pct","quality_score"].forEach(k=>{
+      if(k in it && h[k]!==it[k]){ h[k]=it[k]; touched=true; }
+    });
+    if("ticker" in it && !h.ticker){ h.ticker=it.ticker; touched=true; }   // fill only if blank
+    if("summary" in it && it.summary && h.ai_summary!==it.summary){ h.ai_summary=it.summary; touched=true; }
+    if(touched) applied++;
+  });
+  return {state:ns, applied};
+}
+
 /* ===================================================== SECTION 3 — PROMPTS (string builders, no API) */
 function buildAssessPrompt(state, nowMonth){
   const d = deriveInvesting(state, nowMonth);
@@ -721,7 +924,7 @@ function buildAssessPrompt(state, nowMonth){
   L.push("== พอร์ตปัจจุบัน (รวม "+fmtTHB(d.totals.totalValue)+", net yield "+d.totals.netBlendedYieldPct.toFixed(2)+"%) ==");
   if(state.investing.holdings.length===0){ L.push("(ยังไม่มีรายการ)"); }
   else state.investing.holdings.forEach(h=>{
-    const unitTxt = (h.units>0 && h.price_per_unit>0) ? " ("+fmtNum(h.units, h.units%1?4:0)+" หน่วย @ "+fmtTHB(h.price_per_unit)+")" : "";
+    const unitTxt = (h.units>0 && h.price_per_unit>0) ? " ("+fmtNum(h.units, h.units%1?4:0)+" หน่วย @ "+fmtNative(h.price_per_unit, h.currency)+(h.currency&&h.currency!=="THB"?" ×"+fmtNum(h.fx_rate,2):"")+")" : "";
     L.push("- "+h.name+(h.ticker?" ("+h.ticker+")":"")+" · ประเภท: "+LABELS.stock_type[h.stock_type]+" · มูลค่า "+fmtTHB(h.value_thb)+unitTxt
       +" · yield "+n0(h.yield_pct)+"%"+(h.quality_score!=null?" · คะแนนคุณภาพ "+h.quality_score+"/12":"")
       +(h.valuation_verdict&&h.valuation_verdict!=="unknown"?" · ราคา:"+LABELS.valuation_verdict[h.valuation_verdict]:"")+" · ตลาด:"+LABELS.market[h.market]);
@@ -771,12 +974,76 @@ function buildDiscoverPrompt(state, nowMonth){
   return L.join("\n");
 }
 
+// Price-update prompt: lists unit-based holdings by id; asks AI to return THB/unit as strict JSON.
+function buildPriceUpdatePrompt(holdings){
+  const L=[];
+  L.push("ช่วยค้นราคาตลาดล่าสุด + อัตราแลกเปลี่ยนล่าสุดของสินทรัพย์แต่ละรายการด้านล่าง แล้วตอบกลับเป็น JSON อย่างเดียว");
+  L.push("");
+  L.push("กติกา:");
+  L.push("- ค้นราคาปัจจุบันหรือราคาปิดล่าสุดของแต่ละรายการ (ใช้ ticker / ชื่อ / ตลาด ที่ให้)");
+  L.push("- ตอบ \"ราคาในสกุลเงินของตลาดนั้น\" (native) + รหัสสกุลเงิน (ccy) + อัตราแลกเปลี่ยน fx = \"กี่บาทต่อ 1 หน่วยสกุลนั้น\"");
+  L.push("- ถ้าเป็นหุ้น/สินทรัพย์ไทย: ccy=\"THB\" และ fx=1");
+  L.push("- ราคาต่อ 1 หน่วย ให้ตรงกับหน่วยที่ฉันถือ (ใช้ราคา/หน่วยปัจจุบันในระบบเป็นตัวอ้างอิงหน่วย)");
+  L.push("- ตอบกลับเป็น JSON array เท่านั้น ห้ามมีข้อความอื่น รูปแบบ:");
+  L.push('  [{"id":"<id เดิม>","native":<ราคาต่อหน่วยสกุลนั้น>,"ccy":"<รหัสสกุล เช่น USD/THB>","fx":<บาทต่อ 1 หน่วยสกุล>}]');
+  L.push("");
+  L.push("== รายการ (ใช้ id เดิม ห้ามแก้) ==");
+  holdings.forEach(h=>{
+    const cur = h.currency||"THB";
+    const ref = h.price_per_unit>0 ? " · ราคา/หน่วยในระบบ "+fmtNum(h.price_per_unit, h.price_per_unit<1?6:(h.price_per_unit%1?2:0))+" "+cur : "";
+    L.push("- id="+h.id+" · "+h.name+(h.ticker?" ("+h.ticker+")":"")
+      +" · ตลาด:"+LABELS.market[h.market]+" · ประเภท:"+LABELS.asset_class[h.asset_class]
+      +" · สกุลปัจจุบัน:"+cur+" · ถือ "+fmtNum(h.units, h.units%1?4:0)+" หน่วย"+ref);
+  });
+  L.push("");
+  L.push("ย้ำ: ตอบ JSON array อย่างเดียว ครบทุก id ที่ให้มา ใช้ id เดิมห้ามเปลี่ยน และแนบ fx ทุกตัว (ไทย=1)");
+  return L.join("\n");
+}
+
+// Enrich prompt: ask AI to classify + score holdings (asset_class/stock_type/yield/quality/valuation/ticker)
+// using the embedded scoring framework. User-truth fields (name/units/cost/market) are NOT requested.
+function buildEnrichPrompt(holdings){
+  const L=[];
+  L.push("ช่วยจัดประเภท + วิเคราะห์คุณภาพการเงิน + สรุปธุรกิจของการลงทุนของฉัน แล้วตอบกลับเป็น JSON อย่างเดียว");
+  L.push("(ฉันกรอกเอง: ชื่อ จำนวนหน่วย ต้นทุน ตลาด — ที่ขอให้ช่วยคือ จัดประเภท/ให้คะแนนการเงิน/ประเมินราคา/yield + สรุปธุรกิจ)");
+  L.push("");
+  L.push("สำคัญ: ด่าน \"เข้าใจธุรกิจ / circle of competence\" เป็นการตัดสินของฉันเอง — อย่าให้คะแนนข้อนี้แทน");
+  L.push("ให้ quality_score ประเมิน \"คุณภาพเชิงการเงิน\" เท่านั้น (เกณฑ์การเงินที่เหลือ) แล้วสรุป \"ธุรกิจหาเงินยังไง\" มาใน summary เพื่อให้ฉันตัดสินด่านนั้นเอง");
+  L.push("");
+  L.push("== ค่าที่ต้องการต่อ 1 รายการ ==");
+  L.push("- asset_class: หนึ่งใน "+ENUMS.asset_class.join(" / "));
+  L.push("- stock_type (จัดตามกรอบ): "+ENUMS.stock_type.join(" / "));
+  L.push("    "+BUCKETS.filter(b=>b!=="cash").map(b=>b+"="+BUCKET_LABEL[b]).join(" · ")+" · none=เงินสด/ไม่ระบุ");
+  L.push("- yield_pct: อัตราปันผล/ผลตอบแทนปัจจุบันโดยประมาณ (ตัวเลข %)");
+  L.push("- quality_score: คะแนนคุณภาพ \"การเงิน\" 0–12 ตามกรอบด้านล่าง (ไม่รวมด่าน circle of competence)");
+  L.push("- valuation_verdict: หนึ่งใน "+ENUMS.valuation_verdict.join(" / ")+" (ประเมินราคาปัจจุบัน)");
+  L.push("- ticker: สัญลักษณ์ (เฉพาะรายการที่ยังไม่มี)");
+  L.push("- summary: สรุปสั้นเพื่อเรียนรู้ (ไทย) — ทำธุรกิจอะไร · หาเงินยังไง (รายได้หลัก) · ทำไมจัดประเภทนี้ · ตัวเลขสำคัญ 2–3 ตัว · ความเสี่ยงหลัก 1 บรรทัด (กระชับ ขึ้นบรรทัดใหม่แต่ละหัวข้อ)");
+  L.push("");
+  L.push(SCORING_FRAMEWORK);
+  L.push("");
+  L.push("== รายการ (ใช้ id เดิม ห้ามแก้) ==");
+  holdings.forEach(h=>{
+    L.push("- id="+h.id+" · "+h.name+(h.ticker?" ("+h.ticker+")":"")+" · ตลาด:"+LABELS.market[h.market]
+      +(h.asset_class?" · ชนิดที่กรอกไว้:"+LABELS.asset_class[h.asset_class]:"")
+      +(h.stock_type&&h.stock_type!=="none"?" · กรอบที่กรอกไว้:"+LABELS.stock_type[h.stock_type]:""));
+  });
+  L.push("");
+  L.push("ตอบกลับเป็น JSON array เท่านั้น ห้ามมีข้อความอื่น รูปแบบ:");
+  L.push('  [{"id":"<id เดิม>","asset_class":"...","stock_type":"...","yield_pct":<ตัวเลข>,"quality_score":<0-12>,"valuation_verdict":"...","ticker":"...","summary":"ทำอะไร...\\nหาเงินยังไง...\\nความเสี่ยง..."}]');
+  L.push("");
+  L.push(DISCLAIMER_TH);
+  return L.join("\n");
+}
+
 /* ===================================================== SECTION 4 — RENDER */
 const $ = sel => document.querySelector(sel);
 function fmtTHB(n){ if(n==null||!Number.isFinite(n)) return "—";
   return new Intl.NumberFormat("th-TH",{style:"currency",currency:"THB",maximumFractionDigits:0}).format(n); }
 function fmtNum(n,d){ if(n==null||!Number.isFinite(n)) return "—"; return n.toLocaleString("th-TH",{maximumFractionDigits:d==null?0:d}); }
 function fmtPct(n,d){ if(n==null||!Number.isFinite(n)) return "—"; return n.toFixed(d==null?1:d)+"%"; }
+function fmtDateTH(iso){ try{ return new Date(iso).toLocaleDateString("th-TH",{day:"2-digit",month:"2-digit",year:"numeric"}); }catch(e){ return "—"; } }
+function fmtNative(n,ccy){ if(n==null||!Number.isFinite(n)) return "—"; if(!ccy||ccy==="THB") return fmtTHB(n); return fmtNum(n, n%1?2:0)+" "+esc(ccy); }   // esc: ccy is user/AI-sourced, goes to innerHTML
 function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c])); }
 
 function renderTabs(){
@@ -921,11 +1188,12 @@ function renderInvestingDynamic(){
       <th class="num">ปันผลสุทธิ/เดือน</th><th class="num">YoC</th><th>ราคา</th><th></th></tr></thead><tbody>
       ${STATE.investing.holdings.map(h=>{
         const yoc=holdingYieldOnCost(h);
+        const fxTxt = (h.currency&&h.currency!=="THB"&&h.fx_rate>0) ? ` <small class="muted">×${fmtNum(h.fx_rate,2)}</small>` : "";
         const unitCell = (h.units>0 && h.price_per_unit>0)
-          ? `${fmtNum(h.units, h.units%1?4:0)} × ${fmtTHB(h.price_per_unit)}`
+          ? `${fmtNum(h.units, h.units%1?4:0)} × ${fmtNative(h.price_per_unit, h.currency)}${fxTxt}`
           : `<small class="muted">ก้อน</small>`;
         return `<tr>
-          <td data-label="ชื่อ"><b>${esc(h.name)}</b>${h.ticker?` <small class="muted">${esc(h.ticker)}</small>`:""}</td>
+          <td data-label="ชื่อ"><b>${esc(h.name)}</b>${h.ticker?` <small class="muted">${esc(h.ticker)}</small>`:""}<button class="btn sm" style="padding:0 6px;margin-left:6px;font-size:12px" data-info-h="${h.id}" title="สรุป / เรียนรู้หุ้นตัวนี้">ⓘ</button>${h.understood?` <small title="คุณทำเครื่องหมายว่าเข้าใจธุรกิจนี้" style="color:var(--green)">✓</small>`:""}</td>
           <td data-label="ประเภท"><span class="type-dot" style="background:${BUCKET_COLOR[bucketOf(h)]}"></span>${esc(LABELS.stock_type[h.stock_type])}</td>
           <td class="num" data-label="หน่วย × ราคา">${unitCell}</td>
           <td class="num" data-label="มูลค่า">${fmtTHB(h.value_thb)}</td>
@@ -981,6 +1249,16 @@ function renderInvestingDynamic(){
         ? `<div class="banner bad"><span class="bi">⚠️</span><div><b>BRAKE</b> — ${esc(BRAKE_MSG)}</div></div>`
         : (allocHTML?allocHTML+`<div class="legend"><span>▮ แท่ง = สัดส่วนปัจจุบัน</span><span>│ เส้น = เป้าหมาย</span></div>`
           :`<div class="muted">เพิ่มหุ้นและตั้งประเภทเพื่อดูสัดส่วน</div>`))}
+  </div>
+
+  <!-- AI data update -->
+  <div class="card">
+    <div class="card-head"><h2>อัปเดตข้อมูลด้วย AI <span class="sub">${(STATE.meta&&STATE.meta.lastPriceUpdate)?("ราคาอัปเดตเมื่อ "+fmtDateTH(STATE.meta.lastPriceUpdate)):"พี่กรอกที่รู้ · AI เติมที่เหลือ"}</span></h2></div>
+    <p class="muted" style="font-size:13px;margin-top:0">พี่กรอก ชื่อ/หน่วย/ต้นทุน/ตลาด — ที่เหลือให้ AI เติมให้ (แอปไม่ต่อเน็ตเอง พี่เป็นคนวางผลกลับ)</p>
+    <div class="grid cols-2">
+      <button class="btn block" id="prompt-price">🔄 อัปเดตราคา + FX</button>
+      <button class="btn block" id="prompt-enrich">🏷️ จัดประเภท / ตรวจข้อมูล</button>
+    </div>
   </div>
 
   <!-- AI prompts -->
@@ -1187,9 +1465,12 @@ function wireGoalFormEvents(){
 function wireInvDynamicEvents(){
   const add=document.getElementById("add-holding"); if(add) add.onclick=()=>openItemForm("holding",null);
   document.querySelectorAll("[data-edit-h]").forEach(b=>b.onclick=()=>openItemForm("holding",findById(STATE.investing.holdings,b.dataset.editH)));
+  document.querySelectorAll("[data-info-h]").forEach(b=>b.onclick=()=>openSummaryModal(b.dataset.infoH));
   document.querySelectorAll("[data-del-h]").forEach(b=>b.onclick=()=>deleteItem("holding",b.dataset.delH));
   const pa=document.getElementById("prompt-assess"); if(pa) pa.onclick=()=>showPrompt("ประเมินพอร์ต + อัปเดตข่าว", buildAssessPrompt(STATE,currentMonth()));
   const pd=document.getElementById("prompt-discover"); if(pd) pd.onclick=()=>showPrompt("หาหุ้นที่น่าสนใจ", buildDiscoverPrompt(STATE,currentMonth()));
+  const pp=document.getElementById("prompt-price"); if(pp) pp.onclick=openPriceUpdateModal;
+  const pe=document.getElementById("prompt-enrich"); if(pe) pe.onclick=openEnrichModal;
 }
 
 // ---- entity form schemas ----
@@ -1200,9 +1481,11 @@ const FORM_SCHEMAS = {
       {k:"ticker",l:"Ticker",t:"text"},
       {k:"asset_class",l:"ประเภทสินทรัพย์",t:"select",e:"asset_class"},
       {k:"stock_type",l:"ประเภทตามกรอบ",t:"select",e:"stock_type"},
-      {k:"units",l:"จำนวนหน่วย/หุ้น",t:"number",uiRequired:true,hint:"มูลค่า = จำนวน × ราคา/หน่วย"},
-      {k:"price_per_unit",l:"ราคาตลาด/หน่วย (฿)",t:"number",uiRequired:true},
-      {k:"cost_per_unit",l:"ต้นทุน/หน่วย (฿) — ไม่บังคับ",t:"number"},
+      {k:"units",l:"จำนวนหน่วย/หุ้น",t:"number",uiRequired:true,hint:"มูลค่า = จำนวน × ราคา × FX"},
+      {k:"currency",l:"สกุลเงิน (เช่น USD · ว่าง = บาท)",t:"text",hint:"สกุลที่ราคาซื้อขายจริง"},
+      {k:"price_per_unit",l:"ราคาตลาด/หน่วย (สกุลข้างบน)",t:"number",uiRequired:true},
+      {k:"fx_rate",l:"อัตราแลกเปลี่ยน (บาท/หน่วยสกุล)",t:"number",hint:"บาท = 1 · ปุ่มอัปเดตราคาจะรีเฟรชค่านี้ให้"},
+      {k:"cost_per_unit",l:"ต้นทุน/หน่วย (สกุลข้างบน) — ไม่บังคับ",t:"number"},
       {k:"yield_pct",l:"เงินปันผล/ผลตอบแทน (%)",t:"number"},
       {k:"quality_score",l:"คะแนนคุณภาพ 0–12 — ไม่บังคับ",t:"number"},
       {k:"valuation_verdict",l:"ระดับราคา",t:"select",e:"valuation_verdict"},
@@ -1281,7 +1564,8 @@ function saveItemForm(type, existing){
   const numErr = sch.fields.filter(f=>f.t==="number").some(f=> obj[f.k]!=null && (!Number.isFinite(obj[f.k])||obj[f.k]<0));
   if(numErr){ alert("ตัวเลขต้องไม่ติดลบ และเป็นตัวเลขที่ถูกต้อง"); return; }
   if(type==="holding" && obj.quality_score!=null && (obj.quality_score<0||obj.quality_score>12)){ alert("คะแนนคุณภาพต้องอยู่ 0–12"); return; }
-  if(type==="holding") computeHoldingDerived(obj);   // value_thb / cost_basis_thb = units × price/cost
+  if(type==="holding" && obj.currency && String(obj.currency).trim().toUpperCase()!=="THB" && !(obj.fx_rate>0)){ alert("สินทรัพย์สกุลต่างประเทศ ต้องใส่อัตราแลกเปลี่ยน (บาท/หน่วยสกุล)"); return; }
+  if(type==="holding") computeHoldingDerived(obj);   // value_thb / cost_basis_thb = units × price × fx
 
   const ns = structuredCloneSafe(STATE);
   const [a,b]=sch.coll.split(".");
@@ -1322,6 +1606,173 @@ function showPrompt(title, text){
         if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(ta.value).then(done).catch(fail); }
         else fail(); }},
   ]);
+}
+
+function copyTA(ta, btn){
+  ta.select();
+  const label=btn.textContent;
+  const done=()=>{ btn.textContent="คัดลอกแล้ว ✓"; setTimeout(()=>{ btn.textContent=label; },1500); };
+  const fail=()=>{ try{ if(document.execCommand("copy")){ done(); return; } }catch(e){} btn.textContent="เลือกแล้ว — กด Ctrl/Cmd+C"; };
+  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(ta.value).then(done).catch(fail); }
+  else fail();
+}
+
+// AI price round-trip modal: generate prompt → user pastes AI reply → preview → confirm.
+function openPriceUpdateModal(){
+  const holdings = STATE.investing.holdings.filter(h=>h.units>0);
+  if(holdings.length===0){
+    openModal("อัปเดตราคาด้วย AI",
+      `<div class="banner info"><span class="bi">💡</span><div>ฟีเจอร์นี้ใช้กับรายการที่บันทึกแบบ <b>จำนวนหน่วย × ราคา/หน่วย</b> เท่านั้น (รายการแบบ “ก้อน” ไม่มีจำนวนหน่วยให้คำนวณราคา) — แก้รายการให้ใส่จำนวนหน่วยก่อน แล้วลองใหม่</div></div>`,
+      [{label:"ปิด",cls:"btn",on:closeModal}]);
+    return;
+  }
+  const prompt = buildPriceUpdatePrompt(holdings);
+  const body = `
+    <p class="muted" style="margin-top:0;font-size:13px"><b>ขั้นที่ 1</b> — คัดลอก prompt นี้ไปวางในแชต AI ที่ค้นราคาตลาดได้ (เช่น Claude, ChatGPT)</p>
+    <textarea class="promptbox" id="pu-prompt" readonly style="min-height:120px">${esc(prompt)}</textarea>
+    <button class="btn sm" id="pu-copy" style="margin:8px 0 16px">คัดลอก prompt</button>
+    <p class="muted" style="font-size:13px"><b>ขั้นที่ 2</b> — วางผลลัพธ์ (JSON) ที่ AI ตอบกลับมาที่นี่</p>
+    <textarea class="promptbox" id="pu-paste" style="min-height:110px" placeholder='[{"id":"...","price_thb":123.5}]'></textarea>
+    <button class="btn sm primary" id="pu-check" style="margin-top:8px">ตรวจสอบ →</button>
+    <div id="pu-preview"></div>`;
+  openModal("อัปเดตราคาด้วย AI", body, [{label:"ปิด",cls:"btn",on:closeModal}]);
+  document.getElementById("pu-copy").onclick=function(){ copyTA(document.getElementById("pu-prompt"), this); };
+  document.getElementById("pu-check").onclick=renderPricePreview;
+}
+
+function renderPricePreview(){
+  const ta=document.getElementById("pu-paste");
+  const {prices, errors}=parsePriceResponse(ta?ta.value:"");
+  const pv=previewPriceUpdate(STATE.investing.holdings, prices);
+  const box=document.getElementById("pu-preview");
+  let html="";
+  if(errors.length) html+=`<div class="banner bad" style="margin-top:14px"><span class="bi">⚠️</span><div>${errors.map(esc).join("<br>")}</div></div>`;
+  if(pv.rows.length){
+    html+=`<p class="muted" style="font-size:13px;margin:14px 0 4px"><b>ขั้นที่ 3</b> — ตรวจราคาก่อนยืนยัน (${pv.rows.length} รายการ)</p>`;
+    html+=`<table class="tbl"><thead><tr><th>ชื่อ</th><th class="num">ราคาเดิม</th><th class="num">ราคาใหม่</th><th class="num">มูลค่าใหม่</th><th class="num">เปลี่ยน</th></tr></thead><tbody>`;
+    pv.rows.forEach(r=>{
+      const chg = r.pctChange==null ? "<small class='muted'>ใหม่</small>" : ((r.pctChange>=0?"+":"")+r.pctChange.toFixed(1)+"%");
+      const col = r.pctChange==null ? "" : ("color:"+(r.pctChange>=0?"var(--green)":"var(--red)"));
+      const fxTxt = (r.ccy&&r.ccy!=="THB") ? `<br><small class="muted">×${fmtNum(r.fx,2)} บาท/${esc(r.ccy)}</small>` : "";
+      html+=`<tr><td><b>${esc(r.name)}</b>${r.ticker?` <small class="muted">${esc(r.ticker)}</small>`:""}</td>
+        <td class="num">${r.oldPrice>0?fmtNative(r.oldPrice,r.ccy):"—"}</td>
+        <td class="num">${fmtNative(r.newPrice,r.ccy)}${fxTxt}</td>
+        <td class="num">${fmtTHB(r.newValue)}</td>
+        <td class="num" style="${col}">${chg}</td></tr>`;
+    });
+    html+=`</tbody></table>`;
+  }
+  if(pv.unmatched.length) html+=`<div class="banner info" style="margin-top:10px"><span class="bi">ℹ️</span><div>ข้าม ${pv.unmatched.length} รายการที่ไม่ตรง id หรือเป็นแบบก้อน</div></div>`;
+  if(pv.notUpdated.length) html+=`<div class="banner info" style="margin-top:10px"><span class="bi">ℹ️</span><div>ยังไม่มีราคาใหม่: ${esc(pv.notUpdated.join(", "))}</div></div>`;
+  if(!pv.rows.length && !errors.length) html+=`<div class="banner info" style="margin-top:14px"><span class="bi">ℹ️</span><div>ไม่มีรายการให้อัปเดต</div></div>`;
+  box.innerHTML=html;
+  if(pv.rows.length){
+    const btn=document.createElement("button");
+    btn.className="btn primary block"; btn.style.marginTop="14px";
+    btn.textContent="ยืนยันอัปเดต "+pv.rows.length+" รายการ";
+    btn.onclick=()=>commitPriceUpdate(prices);
+    box.appendChild(btn);
+  }
+}
+
+function commitPriceUpdate(prices){
+  const {state:ns, applied}=applyPrices(STATE, prices);
+  ns.meta=ns.meta||{}; ns.meta.lastPriceUpdate=nowISO();
+  closeModal();
+  commit(ns);
+  alert("อัปเดตราคา "+applied+" รายการแล้ว ✓");
+}
+
+// AI enrich/classify modal: generate prompt → user pastes AI reply → preview changes → confirm.
+function openEnrichModal(){
+  const holdings = STATE.investing.holdings.filter(h=>h.name);
+  if(holdings.length===0){
+    openModal("จัดประเภท / ตรวจข้อมูลด้วย AI",
+      `<div class="banner info"><span class="bi">💡</span><div>ยังไม่มีรายการลงทุน — เพิ่มรายการก่อน แล้วให้ AI ช่วยจัดประเภท/ให้คะแนน/ประเมินราคา</div></div>`,
+      [{label:"ปิด",cls:"btn",on:closeModal}]);
+    return;
+  }
+  const prompt = buildEnrichPrompt(holdings);
+  const body = `
+    <p class="muted" style="margin-top:0;font-size:13px"><b>ขั้นที่ 1</b> — คัดลอก prompt ไปวางในแชต AI (Claude/ChatGPT) ให้ช่วยจัดประเภท/ให้คะแนน/ประเมินราคา</p>
+    <textarea class="promptbox" id="en-prompt" readonly style="min-height:120px">${esc(prompt)}</textarea>
+    <button class="btn sm" id="en-copy" style="margin:8px 0 16px">คัดลอก prompt</button>
+    <p class="muted" style="font-size:13px"><b>ขั้นที่ 2</b> — วางผลลัพธ์ (JSON) ที่ AI ตอบกลับมาที่นี่</p>
+    <textarea class="promptbox" id="en-paste" style="min-height:110px" placeholder='[{"id":"...","asset_class":"stock","stock_type":"compounder","quality_score":9}]'></textarea>
+    <button class="btn sm primary" id="en-check" style="margin-top:8px">ตรวจสอบ →</button>
+    <div id="en-preview"></div>`;
+  openModal("จัดประเภท / ตรวจข้อมูลด้วย AI", body, [{label:"ปิด",cls:"btn",on:closeModal}]);
+  document.getElementById("en-copy").onclick=function(){ copyTA(document.getElementById("en-prompt"), this); };
+  document.getElementById("en-check").onclick=renderEnrichPreview;
+}
+
+function renderEnrichPreview(){
+  const ta=document.getElementById("en-paste");
+  const {items, errors}=parseEnrichResponse(ta?ta.value:"");
+  const pv=previewEnrich(STATE.investing.holdings, items);
+  const box=document.getElementById("en-preview");
+  let html="";
+  if(errors.length) html+=`<div class="banner bad" style="margin-top:14px"><span class="bi">⚠️</span><div>${errors.map(esc).join("<br>")}</div></div>`;
+  if(pv.rows.length){
+    html+=`<p class="muted" style="font-size:13px;margin:14px 0 4px"><b>ขั้นที่ 3</b> — ตรวจสิ่งที่ AI จะแก้ (${pv.rows.length} รายการ)</p>`;
+    html+=`<table class="tbl"><thead><tr><th>ชื่อ</th><th>การเปลี่ยนแปลง</th></tr></thead><tbody>`;
+    pv.rows.forEach(r=>{
+      const chg = r.changes.map(c=>`${esc(c.field)}: <span class="muted">${esc(String(c.old))}</span> → <b>${esc(String(c.neu))}</b>`).join("<br>");
+      html+=`<tr><td><b>${esc(r.name)}</b>${r.ticker?` <small class="muted">${esc(r.ticker)}</small>`:""}</td><td style="font-size:13px">${chg}</td></tr>`;
+    });
+    html+=`</tbody></table>`;
+  }
+  if(pv.unmatched.length) html+=`<div class="banner info" style="margin-top:10px"><span class="bi">ℹ️</span><div>ข้าม ${pv.unmatched.length} รายการที่ไม่ตรง id</div></div>`;
+  if(pv.noChange) html+=`<div class="banner info" style="margin-top:10px"><span class="bi">ℹ️</span><div>${pv.noChange} รายการถูกต้องอยู่แล้ว (ไม่มีอะไรต้องแก้)</div></div>`;
+  if(!pv.rows.length && !errors.length) html+=`<div class="banner info" style="margin-top:14px"><span class="bi">ℹ️</span><div>ไม่มีรายการให้อัปเดต</div></div>`;
+  box.innerHTML=html;
+  if(pv.rows.length){
+    const btn=document.createElement("button");
+    btn.className="btn primary block"; btn.style.marginTop="14px";
+    btn.textContent="ยืนยันแก้ "+pv.rows.length+" รายการ";
+    btn.onclick=()=>commitEnrich(items);
+    box.appendChild(btn);
+  }
+}
+
+function commitEnrich(items){
+  const {state:ns, applied}=applyEnrich(STATE, items);
+  closeModal();
+  commit(ns);
+  alert("อัปเดตข้อมูล "+applied+" รายการแล้ว ✓");
+}
+
+// 1-page stock summary popup (learning) — opened by the ⓘ after an asset name.
+function openSummaryModal(id){
+  const h = findById(STATE.investing.holdings, id);
+  if(!h) return;
+  const chips = [
+    `<span class="chip">${esc(LABELS.asset_class[h.asset_class]||h.asset_class)}</span>`,
+    h.stock_type&&h.stock_type!=="none"?`<span class="chip">${esc(BUCKET_LABEL[bucketOf(h)]||"")}</span>`:"",
+    h.quality_score!=null?`<span class="chip ${h.quality_score>=10?'good':(h.quality_score>=7?'warn':'bad')}">คุณภาพการเงิน ${h.quality_score}/12</span>`:"",
+    (h.valuation_verdict&&h.valuation_verdict!=="unknown")?`<span class="chip">ราคา: ${esc(LABELS.valuation_verdict[h.valuation_verdict])}</span>`:"",
+    h.yield_pct>0?`<span class="chip">yield ${fmtPct(h.yield_pct)}</span>`:"",
+    h.value_thb>0?`<span class="chip">มูลค่า ${fmtTHB(h.value_thb)}</span>`:"",
+  ].filter(Boolean).join(" ");
+  const summaryHtml = h.ai_summary
+    ? esc(h.ai_summary).replace(/\n/g,"<br>")
+    : `<span class="muted">ยังไม่มีสรุป — กดปุ่ม “🏷️ จัดประเภท / ตรวจข้อมูล” แล้วให้ AI สรุปธุรกิจมาให้ (ดูว่าหุ้นตัวนี้หาเงินยังไง)</span>`;
+  const body = `
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">${chips}</div>
+    <div style="font-size:14px;line-height:1.65">${summaryHtml}</div>
+    <label class="row-check" style="margin-top:16px;display:flex;gap:9px;align-items:flex-start;cursor:pointer">
+      <input type="checkbox" id="sum-understood" ${h.understood?"checked":""}/>
+      <span>ฉันเข้าใจว่าธุรกิจนี้หาเงินยังไง <small class="muted">— ด่านนี้เป็นการตัดสินของเจ้าของพอร์ต (AI ไม่ให้คะแนนแทน)</small></span>
+    </label>
+    <p class="disc" style="margin-top:14px">${esc(DISCLAIMER_TH)}</p>`;
+  openModal((h.name||"สรุปหุ้น")+(h.ticker?" ("+h.ticker+")":""), body, [{label:"ปิด",cls:"btn",on:closeModal}]);
+  const cb=document.getElementById("sum-understood");
+  if(cb) cb.onchange=()=>{                          // owner's competence gate — persists, re-renders tab behind modal
+    if(!cb.isConnected) return;                     // guard: modal lives in #modal-body (outside #view), survives commit()'s re-render today; protects if ever moved inside #view
+    const ns=structuredCloneSafe(STATE);
+    const t=findById(ns.investing.holdings, id); if(t) t.understood=cb.checked;
+    commit(ns);
+  };
 }
 
 function wireGlobalEvents(){
@@ -1438,10 +1889,147 @@ function runSelfTests(){
     investing:{holdings:[{id:"x",name:"OLD",asset_class:"stock",stock_type:"defensive",value_thb:9000,yield_pct:3}]},
     real_estate:{properties:[]}, insurance:{policies:[]}};
   const mig = validateState(migrateState(JSON.parse(JSON.stringify(v1))));
-  ok("v1→v2 migrates ok", mig.ok===true);
-  ok("v1→v2 schemaVersion=2", mig.value.schemaVersion===2);
+  ok("v1→v3 migrates ok", mig.ok===true);
+  ok("v1→v4 schemaVersion=4", mig.value.schemaVersion===4);
   close("v1 lump value preserved", mig.value.investing.holdings[0].value_thb, 9000, 1);
   ok("v1 holding units=null", mig.value.investing.holdings[0].units===null);
+
+  // ---- AI price round-trip: parse ----
+  const prA = parsePriceResponse('[{"id":"h1","price_thb":120.5},{"id":"h2","price_thb":50}]');
+  ok("parse plain array (2 ok, 0 err)", prA.prices.length===2 && prA.errors.length===0);
+  close("parse keeps price value", prA.prices[0].priceThb, 120.5, 1e-6);
+  ok("parse strips ```json fence", parsePriceResponse("```json\n[{\"id\":\"h1\",\"price_thb\":10}]\n```").prices[0].priceThb===10);
+  ok("parse ignores surrounding prose", parsePriceResponse("ราคาล่าสุดครับ:\n[{\"id\":\"h1\",\"price\":99}] หวังว่าจะช่วยได้").prices[0].priceThb===99);
+  ok("parse {prices:[…]} wrapper", parsePriceResponse('{"prices":[{"id":"h1","thb":7}]}').prices[0].priceThb===7);
+  ok("parse {id:price} map", parsePriceResponse('{"h1":12.5,"h2":8}').prices.length===2);
+  ok("parse single object", parsePriceResponse('{"id":"h1","price_thb":5}').prices[0].priceThb===5);
+  const prBad = parsePriceResponse('[{"id":"h1"},{"price_thb":5},{"id":"h2","price_thb":0},{"id":"h3","price_thb":-1}]');
+  ok("parse rejects bad rows (0 ok, 4 err)", prBad.prices.length===0 && prBad.errors.length===4);
+  ok("parse empty → 1 err", parsePriceResponse("").errors.length===1);
+  ok("parse non-json → 1 err", parsePriceResponse("ขอโทษหาราคาไม่เจอ").errors.length===1);
+  const prNat = parsePriceResponse('[{"id":"h1","price_thb":350,"native":10,"ccy":"USD"}]');
+  ok("parse carries native+ccy", prNat.prices[0].native===10 && prNat.prices[0].ccy==="USD");
+  ok("parse price with comma string", parsePriceResponse('[{"id":"h1","price_thb":"1,234.5"}]').prices[0].priceThb===1234.5);
+  ok("parse caps ccy to 6 chars", parsePriceResponse('[{"id":"h1","price_thb":5,"ccy":"'+("A".repeat(50))+'"}]').prices[0].ccy.length===6);
+  ok("parse uppercases ccy", parsePriceResponse('[{"id":"h1","native":1,"fx":35,"ccy":"usd"}]').prices[0].ccy==="USD");
+  ok("parse {prices:non-array} → 1 err", parsePriceResponse('{"prices":42}').errors.length===1);
+
+  // ---- AI price round-trip: preview ----
+  const puH=[
+    computeHoldingDerived({id:"h1",name:"A",units:100,price_per_unit:10,yield_pct:0}),
+    computeHoldingDerived({id:"h2",name:"B",units:50,price_per_unit:20,yield_pct:0}),
+    computeHoldingDerived({id:"h3",name:"Lump",units:null,price_per_unit:null,value_thb:5000,yield_pct:0}),
+  ];
+  const pvw = previewPriceUpdate(puH, [{id:"h1",priceThb:12},{id:"hX",priceThb:1},{id:"h3",priceThb:9}]);
+  ok("preview 1 matched row (h1)", pvw.rows.length===1 && pvw.rows[0].id==="h1");
+  close("preview newValue 100×12=1200", pvw.rows[0].newValue, 1200, 1e-6);
+  close("preview pctChange +20%", pvw.rows[0].pctChange, 20, 1e-6);
+  ok("preview unmatched = hX + lump h3", pvw.unmatched.length===2);
+  ok("preview notUpdated lists B", pvw.notUpdated.indexOf("B")>=0 && pvw.notUpdated.indexOf("Lump")<0);
+  const pvwNew = previewPriceUpdate([computeHoldingDerived({id:"n1",name:"NoPrice",units:10,price_per_unit:null})], [{id:"n1",priceThb:5}]);
+  ok("preview pctChange null when no old price", pvwNew.rows[0].pctChange===null);
+
+  // ---- AI price round-trip: apply ----
+  const apSt = defaultState();
+  apSt.investing.holdings=[
+    computeHoldingDerived({id:"h1",name:"A",units:100,price_per_unit:10,cost_per_unit:8,yield_pct:0,market:"TH",asset_class:"stock",stock_type:"compounder"}),
+    computeHoldingDerived({id:"h3",name:"Lump",units:null,price_per_unit:null,value_thb:5000,yield_pct:0,market:"TH",asset_class:"stock",stock_type:"defensive"}),
+  ];
+  const ap = applyPrices(apSt, [{id:"h1",priceThb:15},{id:"h3",priceThb:99},{id:"hX",priceThb:1}]);
+  ok("apply applied count = 1", ap.applied===1);
+  close("apply sets price_per_unit", ap.state.investing.holdings[0].price_per_unit, 15, 1e-6);
+  close("apply re-derives value 100×15=1500", ap.state.investing.holdings[0].value_thb, 1500, 1e-6);
+  close("apply keeps cost basis 100×8=800", ap.state.investing.holdings[0].cost_basis_thb, 800, 1e-6);
+  close("apply leaves lump untouched", ap.state.investing.holdings[1].value_thb, 5000, 1e-6);
+  ok("apply does not mutate source", apSt.investing.holdings[0].price_per_unit===10);
+
+  // ---- AI price round-trip: prompt builder ----
+  const puPrompt = buildPriceUpdatePrompt([{id:"hZ",name:"Z",ticker:"ZZ",units:5,price_per_unit:3,market:"US",asset_class:"stock"}]);
+  ok("prompt contains holding id", puPrompt.indexOf("hZ")>=0);
+  ok("prompt asks native+fx JSON", puPrompt.indexOf("native")>=0 && puPrompt.indexOf("fx")>=0);
+
+  // ---- meta.lastPriceUpdate survives validate (additive, no schema bump) ----
+  const metaSt = defaultState(); metaSt.meta.lastPriceUpdate="2026-06-26T00:00:00.000Z";
+  ok("meta.lastPriceUpdate survives validate", validateState(metaSt).value.meta.lastPriceUpdate==="2026-06-26T00:00:00.000Z");
+
+  // ---- v3: native currency + fx ----
+  const hdFx = computeHoldingDerived({units:5, price_per_unit:220, cost_per_unit:200, fx_rate:35.5});
+  close("v3 value 5×220×35.5=39050", hdFx.value_thb, 39050, 1e-3);
+  close("v3 cost 5×200×35.5=35500", hdFx.cost_basis_thb, 35500, 1e-3);
+  close("v3 THB fx=1 value=6000", computeHoldingDerived({units:100, price_per_unit:60, fx_rate:1}).value_thb, 6000, 1e-6);
+  close("v3 missing fx defaults to 1", computeHoldingDerived({units:10, price_per_unit:50}).value_thb, 500, 1e-6);
+  // migration v2 (THB price, no currency/fx) → v3: value kept, currency/fx filled
+  const v2h = {schemaVersion:2, meta:{onboarded:true}, goal:defaultState().goal, settings:defaultState().settings,
+    investing:{holdings:[{id:"u",name:"TH",asset_class:"stock",stock_type:"compounder",units:100,price_per_unit:50,cost_per_unit:40,yield_pct:3}]},
+    real_estate:{properties:[]}, insurance:{policies:[]}};
+  const m3 = validateState(migrateState(JSON.parse(JSON.stringify(v2h))));
+  ok("v2→v4 migrates ok", m3.ok===true && m3.value.schemaVersion===4);
+  close("v2→v3 value unchanged 5000", m3.value.investing.holdings[0].value_thb, 5000, 1e-6);
+  ok("v2→v3 currency default THB", m3.value.investing.holdings[0].currency==="THB");
+  ok("v2→v3 fx default 1", m3.value.investing.holdings[0].fx_rate===1);
+  // parse fx + native-only rules
+  const prFx = parsePriceResponse('[{"id":"h1","native":220,"ccy":"USD","fx":35.5}]');
+  ok("parse native+ccy+fx", prFx.prices[0].native===220 && prFx.prices[0].fx===35.5 && prFx.prices[0].ccy==="USD");
+  ok("parse native w/o fx → rejected", parsePriceResponse('[{"id":"h1","native":220,"ccy":"USD"}]').prices.length===0);
+  // apply native+fx: updates price, fx, currency together + value via fx
+  const apFxSt = defaultState();
+  apFxSt.investing.holdings=[computeHoldingDerived({id:"u",name:"AAPL",units:5,price_per_unit:200,cost_per_unit:180,currency:"USD",fx_rate:33,yield_pct:0,asset_class:"stock",stock_type:"compounder",market:"US"})];
+  const apFx = applyPrices(apFxSt, [{id:"u",native:230,fx:36,ccy:"USD"}]);
+  ok("apply native applied=1", apFx.applied===1);
+  close("apply sets native price 230", apFx.state.investing.holdings[0].price_per_unit, 230, 1e-6);
+  close("apply refreshes fx to 36", apFx.state.investing.holdings[0].fx_rate, 36, 1e-6);
+  close("apply value 5×230×36=41400", apFx.state.investing.holdings[0].value_thb, 41400, 1e-3);
+  // THB-only reply on a foreign holding: keep currency, value === given THB (5×8100)
+  const apThbOnly = applyPrices(apFxSt, [{id:"u",priceThb:8100}]);
+  close("THB-only on USD holding: value=40500", apThbOnly.state.investing.holdings[0].value_thb, 40500, 1e-3);
+  ok("THB-only keeps USD currency", apThbOnly.state.investing.holdings[0].currency==="USD");
+
+  // ---- AI enrich/classify round-trip ----
+  const enA = parseEnrichResponse('[{"id":"h1","asset_class":"reit","stock_type":"high_yield","yield_pct":6.5,"quality_score":9,"valuation_verdict":"cheap","ticker":"XYZ"}]');
+  ok("enrich parse valid (1 ok, 0 err)", enA.items.length===1 && enA.errors.length===0);
+  ok("enrich maps asset_class", enA.items[0].asset_class==="reit");
+  ok("enrich maps quality 9", enA.items[0].quality_score===9);
+  ok("enrich drops bad enum", !("asset_class" in parseEnrichResponse('[{"id":"h1","asset_class":"crypto","yield_pct":3}]').items[0]));
+  ok("enrich drops quality>12", !("quality_score" in parseEnrichResponse('[{"id":"h1","quality_score":15,"yield_pct":3}]').items[0]));
+  ok("enrich drops yield>100", !("yield_pct" in parseEnrichResponse('[{"id":"h1","yield_pct":9999,"quality_score":5}]').items[0]));
+  ok("enrich uppercases ticker", parseEnrichResponse('[{"id":"h1","ticker":"dif"}]').items[0].ticker==="DIF");
+  ok("enrich needs id + ≥1 field", parseEnrichResponse('[{"id":"h1"}]').items.length===0 && parseEnrichResponse('[{"id":"h1"}]').errors.length===1);
+  ok("enrich parse empty → err", parseEnrichResponse("").errors.length===1);
+  ok("enrich reuses extractJsonArray (fence+prose)", parseEnrichResponse("ผลลัพธ์:\n```json\n[{\"id\":\"h1\",\"stock_type\":\"compounder\"}]\n```").items.length===1);
+  // preview: only changed fields, ticker fill-only-if-blank
+  const enH=[{id:"h1",name:"A",asset_class:"stock",stock_type:"none",yield_pct:0,quality_score:null,valuation_verdict:"unknown",ticker:null,value_thb:1000,units:10}];
+  const enPv = previewEnrich(enH, [{id:"h1",asset_class:"stock",stock_type:"compounder",yield_pct:2,quality_score:10,valuation_verdict:"fair",ticker:"AAA"}]);
+  ok("enrich preview 1 row", enPv.rows.length===1);
+  ok("enrich preview skips unchanged asset_class", !enPv.rows[0].changes.some(c=>c.field==="ชนิด"));
+  ok("enrich preview shows stock_type change", enPv.rows[0].changes.some(c=>c.field==="ประเภท"));
+  ok("enrich preview fills blank ticker", enPv.rows[0].changes.some(c=>c.field==="Ticker"));
+  const enPv2 = previewEnrich([{id:"h1",name:"A",ticker:"OLD",asset_class:"stock",stock_type:"compounder",yield_pct:2,quality_score:10,valuation_verdict:"fair"}], [{id:"h1",ticker:"NEW"}]);
+  ok("enrich preview keeps existing ticker (0 rows)", enPv2.rows.length===0 && enPv2.noChange===1);
+  // apply: sets fields, fills blank ticker, leaves value/units untouched, no source mutation
+  const enSt = defaultState();
+  enSt.investing.holdings=[{id:"h1",name:"A",asset_class:"stock",stock_type:"none",yield_pct:0,quality_score:null,valuation_verdict:"unknown",ticker:null,units:10,price_per_unit:5,fx_rate:1,currency:"THB",value_thb:50}];
+  const enAp = applyEnrich(enSt, [{id:"h1",stock_type:"compounder",quality_score:8,ticker:"AAA"},{id:"ghost",stock_type:"defensive"}]);
+  ok("enrich apply applied=1 (ghost skipped)", enAp.applied===1);
+  ok("enrich apply sets stock_type", enAp.state.investing.holdings[0].stock_type==="compounder");
+  ok("enrich apply sets quality", enAp.state.investing.holdings[0].quality_score===8);
+  ok("enrich apply fills ticker", enAp.state.investing.holdings[0].ticker==="AAA");
+  close("enrich apply leaves value_thb", enAp.state.investing.holdings[0].value_thb, 50, 1e-6);
+  ok("enrich apply no source mutation", enSt.investing.holdings[0].stock_type==="none");
+  ok("enrich prompt has id + framework", buildEnrichPrompt([{id:"hQ",name:"Q",ticker:null,market:"TH",asset_class:"stock",stock_type:"none"}]).indexOf("hQ")>=0 && buildEnrichPrompt([{id:"hQ",name:"Q",market:"TH",asset_class:"stock",stock_type:"none"}]).indexOf("quality_score")>=0);
+
+  // ---- v4: stock summary + competence gate ----
+  ok("enrich parse captures summary", parseEnrichResponse('[{"id":"h1","summary":"ขายของออนไลน์\\nหาเงินจากค่าคอม"}]').items[0].summary.indexOf("ขายของ")>=0);
+  ok("enrich apply writes ai_summary", applyEnrich({investing:{holdings:[{id:"h1",name:"A",ai_summary:null}]}}, [{id:"h1",summary:"สรุปใหม่"}]).state.investing.holdings[0].ai_summary==="สรุปใหม่");
+  const sumPv = previewEnrich([{id:"h1",name:"A",ai_summary:null,asset_class:"stock",stock_type:"none",yield_pct:0,quality_score:null,valuation_verdict:"unknown",ticker:"X"}],[{id:"h1",summary:"xx"}]);
+  ok("enrich preview flags summary change", sumPv.rows.length===1 && sumPv.rows[0].changes.some(c=>c.field==="สรุป"));
+  ok("enrich prompt asks summary + splits competence", buildEnrichPrompt([{id:"h1",name:"A",market:"TH",asset_class:"stock",stock_type:"none"}]).indexOf("summary")>=0 && buildEnrichPrompt([{id:"h1",name:"A",market:"TH",asset_class:"stock",stock_type:"none"}]).indexOf("circle of competence")>=0);
+  // v3→v4 migration: ai_summary/understood defaults, value preserved
+  const v3h={schemaVersion:3, meta:{onboarded:true}, goal:defaultState().goal, settings:defaultState().settings, investing:{holdings:[{id:"u",name:"Z",asset_class:"stock",stock_type:"none",units:10,price_per_unit:5,fx_rate:1,currency:"THB",yield_pct:2}]}, real_estate:{properties:[]}, insurance:{policies:[]}};
+  const m4=validateState(migrateState(JSON.parse(JSON.stringify(v3h))));
+  ok("v3→v4 migrates ok (schemaVersion=4)", m4.ok===true && m4.value.schemaVersion===4);
+  ok("v4 ai_summary default null", m4.value.investing.holdings[0].ai_summary===null);
+  ok("v4 understood default false", m4.value.investing.holdings[0].understood===false);
+  close("v3→v4 value preserved 10×5×1=50", m4.value.investing.holdings[0].value_thb, 50, 1e-6);
 
   return R;
 }

@@ -1079,10 +1079,11 @@ function buildAssessPrompt(state, nowMonth){
   }
   if(d.conc.flagged) L.push("⚠️ กระจุกตัว: "+d.conc.topName+" ถือ "+d.conc.topSharePct.toFixed(0)+"% ของพอร์ต");
   L.push("");
-  L.push("== สิ่งที่อยากให้ช่วย ==");
-  L.push("1) ประเมินคุณภาพพอร์ตโดยรวม จุดแข็ง/จุดอ่อน");
-  L.push("2) ชี้การกระจุกตัวและ drift จากสัดส่วนเป้าหมาย พร้อมแนวทางปรับ");
-  L.push("3) สรุปข่าว/พัฒนาการล่าสุดที่มีนัยต่อหุ้นแต่ละตัวข้างต้น (ระบุวันที่/แหล่งถ้าทำได้)");
+  L.push("== สิ่งที่อยากให้ช่วย (ตอบให้คนเพิ่งเริ่มลงทุนเข้าใจ) ==");
+  L.push("1) สรุป 1 บรรทัด: พอร์ตนี้โดยรวมโอเคไหม เพราะอะไร");
+  L.push("2) 3 ปัญหา/ความเสี่ยงที่ควรแก้ก่อน เรียงตามความสำคัญ — แต่ละข้อบอก \"ทำอะไรได้บ้าง\" แบบรูปธรรม");
+  L.push("3) อธิบายการกระจุกตัว + ความต่างจากสัดส่วนเป้าหมาย (drift) เป็นภาษาคน");
+  L.push("4) ข่าว/พัฒนาการล่าสุดที่มีนัยต่อหุ้นแต่ละตัวข้างต้น (ระบุวันที่/แหล่งถ้าทำได้)");
   L.push("");
   L.push(AI_REPLY_GUIDE_TH);
   L.push("");
@@ -1110,9 +1111,11 @@ function buildDiscoverPrompt(state, nowMonth){
   L.push("");
   L.push(SCORING_FRAMEWORK);
   L.push("");
-  L.push("== สิ่งที่อยากให้ช่วย ==");
-  L.push("เสนอหุ้น 5–10 ตัวที่ (ก) ผ่านด่านกลางทุกข้อ (ข) ได้คะแนนคุณภาพสูง (10–12) ในประเภทที่ฉันยังขาด");
-  L.push("(ค) ราคาปัจจุบันถูก/เหมาะ (ไม่แพง) — สำหรับแต่ละตัวให้บอก: ประเภท, เหตุผลที่ผ่าน gate, คะแนนคร่าวๆ, และระดับราคา");
+  L.push("== สิ่งที่อยากให้ช่วย (ตอบให้คนเพิ่งเริ่มลงทุนเข้าใจ) ==");
+  L.push("เสนอหุ้น 5–10 ตัวที่ (ก) ผ่านด่านกลางทุกข้อ (ข) ได้คะแนนคุณภาพสูง (10–12) ในประเภทที่ฉันยังขาด (ค) ราคาปัจจุบันไม่แพง");
+  L.push("แต่ละตัวบอก: ชื่อ+ตลาด · ประเภท · ทำธุรกิจอะไรสั้นๆ (ให้ฉันเรียนรู้) · เหตุผลที่ผ่าน gate · คะแนนคร่าวๆ · ระดับราคา · ระดับความมั่นใจของคุณ (สูง/กลาง/ต่ำ)");
+  L.push("");
+  L.push("⚠️ สำคัญ: หุ้นที่เสนอเป็นแค่จุดเริ่มให้ฉันไปศึกษาต่อ — ราคา/งบอาจล้าสมัย บางตัวอาจไม่มีอยู่จริง ฉันจะตรวจสอบราคาและงบการเงินจริงเองก่อนตัดสินใจทุกครั้ง อย่าเร่งให้ซื้อ");
   L.push("");
   L.push(AI_REPLY_GUIDE_TH);
   L.push("");
@@ -1475,19 +1478,20 @@ function renderInvestingDynamic(){
     </div>
   </div>
 
-  <!-- AI data update -->
+  <!-- AI type 1: data back into the app -->
   <div class="card">
-    <div class="card-head"><h2>อัปเดตข้อมูลด้วย AI <span class="sub">${(STATE.meta&&STATE.meta.lastPriceUpdate)?("ราคาอัปเดตเมื่อ "+fmtDateTH(STATE.meta.lastPriceUpdate)):"พี่กรอกที่รู้ · AI เติมที่เหลือ"}</span></h2></div>
-    <p class="muted" style="font-size:13px;margin-top:0">พี่กรอก ชื่อ/หน่วย/ต้นทุน/ตลาด — ที่เหลือให้ AI เติมให้ (แอปไม่ต่อเน็ตเอง พี่เป็นคนวางผลกลับ)</p>
+    <div class="card-head"><h2>📥 ข้อมูลเข้าแอป <span class="sub">${(STATE.meta&&STATE.meta.lastPriceUpdate)?("ราคาอัปเดตเมื่อ "+fmtDateTH(STATE.meta.lastPriceUpdate)):"AI เติม → วางคำตอบกลับ"}</span></h2></div>
+    <p class="muted" style="font-size:13px;margin-top:0">AI ตอบเป็นโค้ด แล้ว<b>วางกลับในแอป</b> — มีให้ดูตัวอย่างก่อนยืนยันเสมอ</p>
     <div class="grid cols-2">
       <button class="btn block" id="prompt-price">🔄 อัปเดตราคา + FX</button>
       <button class="btn block" id="prompt-enrich">🏷️ จัดประเภท / ตรวจข้อมูล</button>
     </div>
   </div>
 
-  <!-- AI prompts -->
+  <!-- AI type 2: advice to read -->
   <div class="card">
-    <div class="card-head"><h2>ส่งข้อมูลให้ AI ช่วย <span class="sub">สร้าง prompt ไปวางในแชต AI</span></h2></div>
+    <div class="card-head"><h2>💬 คำแนะนำไว้อ่าน <span class="sub">อ่านในแชต AI · ไม่ต้องวางกลับ</span></h2></div>
+    <p class="muted" style="font-size:13px;margin-top:0">AI ตอบเป็นคำอธิบาย — <b>อ่านในแชต AI ได้เลย</b> ไม่มีอะไรต้องเอากลับมาวาง</p>
     <div class="grid cols-2">
       <button class="btn block" id="prompt-assess">🔎 ประเมินพอร์ต + อัปเดตข่าว</button>
       <button class="btn block" id="prompt-discover">🧭 หาหุ้นที่น่าสนใจ (ตามกรอบคะแนน)</button>
@@ -1838,8 +1842,8 @@ function openModal(title, bodyHTML, buttons){
 }
 function closeModal(){ $("#overlay").classList.remove("open"); }
 function showPrompt(title, text){
-  const body=`<p class="muted" style="margin-top:0;font-size:13px">ก๊อปข้อความนี้ไปวางในแชต AI (เช่น Claude, ChatGPT)</p>
-    <textarea class="promptbox" id="prompt-text" readonly>${esc(text)}</textarea>`;
+  const body=`<div class="banner info" style="margin-top:0"><span class="bi">💬</span><div>คัดลอก → วางในแชต AI ฟรี (Claude / ChatGPT / Gemini) → <b>อ่านคำตอบในแชตได้เลย ไม่ต้องเอากลับมาวางในแอป</b></div></div>
+    <textarea class="promptbox" id="prompt-text" readonly style="margin-top:12px">${esc(text)}</textarea>`;
   openModal(title, body, [
     {label:"ปิด", cls:"btn", on:closeModal},
     {label:"คัดลอก", cls:"btn primary", on:function(){ const ta=$("#prompt-text"); ta.select();
@@ -2301,6 +2305,11 @@ function runSelfTests(){
   ok("discover prompt: plain-Thai guardrail", discoverP.indexOf("ตอบเป็นภาษาไทย")>=0);
   ok("discover prompt: not-advice line", discoverP.indexOf("ไม่ใช่คำแนะนำการลงทุน")>=0);
   ok("enrich prompt: no-guess fields", enrichP.indexOf("อย่าเดา")>=0);
+  // ---- P1 beginner-output structure ----
+  ok("assess prompt: 1-line verdict ask", assessP.indexOf("สรุป 1 บรรทัด")>=0);
+  ok("assess prompt: 3 ranked problems", assessP.indexOf("เรียงตามความสำคัญ")>=0);
+  ok("discover prompt: verify-yourself caveat", discoverP.indexOf("ไม่มีอยู่จริง")>=0 && discoverP.indexOf("ตรวจสอบราคา")>=0);
+  ok("discover prompt: confidence ask", discoverP.indexOf("ระดับความมั่นใจ")>=0);
 
   // ---- meta.lastPriceUpdate survives validate (additive, no schema bump) ----
   const metaSt = defaultState(); metaSt.meta.lastPriceUpdate="2026-06-26T00:00:00.000Z";
